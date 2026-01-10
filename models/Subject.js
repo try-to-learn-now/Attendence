@@ -17,8 +17,12 @@ const AttendanceLogSchema = new mongoose.Schema({
 const SubjectSchema = new mongoose.Schema({
   name: { type: String, required: true },
   code: { type: String, required: true },
+  // THIS IS THE HARDCORE ROUTINE (Saved Forever)
+  schedule: [{
+    day: { type: Number, required: true }, // 0=Sun, 1=Mon, 2=Tue...
+    time: { type: String, required: true } // "10:00 AM"
+  }],
   attendance_logs: [AttendanceLogSchema]
 });
 
 export default mongoose.models.Subject || mongoose.model('Subject', SubjectSchema);
-
