@@ -1,54 +1,61 @@
-// app/login/page.js
+// app/page.js
 "use client";
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import SubjectCard from '@/components/SubjectCard';
 
-export default function LoginPage() {
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const router = useRouter();
+export default function Home() {
+  const [subjects, setSubjects] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    
-    // Call the API to verify password
-    const res = await fetch('/api/auth', {
+  useEffect(() => {
+    fetch('/api/subjects')
+      .then(res => res.json())
+      .then(res => {
+        if(res.success) setSubjects(res.data);
+        setLoading(false);
+      });
+  }, []);
+
+  const createSubject = async () => {
+    const name = prompt("Subject Name (e.g., Analog Electronics)");
+    const code = prompt("Subject Code (e.g., 104401)");
+    if(!name || !code) return;
+
+    await fetch('/api/subjects', {
       method: 'POST',
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ name, code })
     });
-
-    if (res.ok) {
-      router.push('/'); // Success! Go to Dashboard
-      router.refresh();
-    } else {
-      setError('Wrong Password! ❌');
-    }
+    window.location.reload();
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-sm">
-        <h1 className="text-2xl font-bold mb-6 text-center">Nitesh ERP 🔒</h1>
-        
-        <form onSubmit={handleLogin}>
-          <input 
-            type="password" 
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter Admin Password"
-            className="w-full p-3 border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          
-          <button 
-            type="submit" 
-            className="w-full bg-black text-white p-3 rounded-lg font-bold hover:bg-gray-800 transition"
-          >
-            Unlock System
-          </button>
-        </form>
-
-        {error && <p className="text-red-500 text-center mt-4 font-bold">{error}</p>}
+    <div className="min-h-screen">
+      <div className="flex justify-between items-center mb-8 mt-2">
+        <div>
+            <h1 className="text-2xl font-black text-gray-900">My Attendance</h1>
+            <p className="text-sm text-gray-400">Engineering Survival Kit</p>
+        </div>
+        <button 
+            onClick={createSubject} 
+            className="bg-black text-white w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold shadow-lg"
+        >
+          +
+        </button>
       </div>
+
+      {loading ? (
+        <p className="text-center text-gray-400 mt-20 animate-pulse">Loading data...</p>
+      ) : subjects.length === 0 ? (
+        <div className="text-center mt-20 opacity-50">
+            <p className="text-4xl mb-2">😴</p>
+            <p>No subjects found.</p>
+            <p className="text-sm">Click + to add one.</p>
+        </div>
+      ) : (
+        subjects.map(sub => (
+          <SubjectCard key={sub._id} subject={sub} />
+        ))
+      )}
     </div>
   );
 }
