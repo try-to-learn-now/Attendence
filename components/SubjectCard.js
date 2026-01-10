@@ -29,21 +29,56 @@ export default function SubjectCard({ subject }) {
       })
     });
 
-    if (res.ok) {
-      window.location.reload(); 
-    } else {
-      alert("Failed to save!");
+    if (res.ok) window.location.reload(); 
+    else alert("Failed to save!");
+  };
+
+  // NEW: Edit The Routine
+  const handleEdit = async () => {
+    const newName = prompt("Edit Subject Name:", subject.name);
+    const newCode = prompt("Edit Subject Code:", subject.code);
+    
+    // Pre-fill the existing schedule so you can just edit it
+    const currentScheduleStr = subject.schedule 
+        ? subject.schedule.map(s => `${s.day}-${s.time}`).join(', ')
+        : "";
+
+    const newScheduleStr = prompt(
+      "Edit Routine (Day-Time, comma separated)\n0=Sun, 1=Mon, 2=Tue...\nExample: 1-10:00AM, 3-02:00PM",
+      currentScheduleStr
+    );
+
+    if (newName && newCode) {
+        const newSchedule = [];
+        if (newScheduleStr) {
+          const parts = newScheduleStr.split(',');
+          parts.forEach(p => {
+            const [d, t] = p.trim().split('-');
+            if(d && t) newSchedule.push({ day: parseInt(d), time: t });
+          });
+        }
+
+        await fetch('/api/subjects', {
+            method: 'PUT',
+            body: JSON.stringify({ _id: subject._id, name: newName, code: newCode, schedule: newSchedule })
+        });
+        window.location.reload();
     }
   };
 
   return (
-    <div className="bg-white p-5 rounded-2xl shadow-sm mb-6 border border-gray-100">
+    <div className="bg-white p-5 rounded-2xl shadow-sm mb-6 border border-gray-100 relative">
+      {/* The Magic Edit Button */}
+      <button onClick={handleEdit} className="absolute top-4 right-4 text-gray-400 hover:text-blue-600 text-xl font-bold p-2">
+        ✎
+      </button>
+
       <div className="flex justify-between items-center mb-4">
         <div>
             <h2 className="text-xl font-bold text-gray-800">{subject.name}</h2>
             <p className="text-xs text-gray-500 font-mono">{subject.code}</p>
         </div>
-        <div className="text-xs text-gray-400">{validClasses} Classes Held</div>
+        <div className="text-xs text-gray-400 mr-8">{validClasses} Classes Held</div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -68,5 +103,4 @@ export default function SubjectCard({ subject }) {
       <PdfButton subjectName={subject.name} logs={logs} />
     </div>
   );
-}
-
+  }
