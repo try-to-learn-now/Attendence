@@ -3,9 +3,10 @@ import dbConnect from '@/lib/db';
 import DailyLog from '@/models/DailyLog';
 import { NextResponse } from 'next/server';
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request) {
   await dbConnect();
-  // Get date from the URL (sent by your phone)
   const { searchParams } = new URL(request.url);
   const dateString = searchParams.get('date');
 
@@ -17,8 +18,10 @@ export async function GET(request) {
 
 export async function POST(req) {
   await dbConnect();
-  // TRUST THE PHONE'S DATE (received from frontend)
+  // ACCEPT THE DATE FROM FRONTEND (Fixes Timezone)
   const { biometric, dateString } = await req.json();
+
+  if (!dateString) return NextResponse.json({ error: "Date required" }, { status: 400 });
 
   await DailyLog.findOneAndUpdate(
     { dateString: dateString },
