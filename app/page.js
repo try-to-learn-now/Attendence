@@ -7,7 +7,7 @@ import SubjectCard from '@/components/SubjectCard';
 
 export default function Home() {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [todayClasses, setTodayClasses] = useState([]); // This now holds Routine + Extras
+  const [todayClasses, setTodayClasses] = useState([]); 
   const [extraClassCode, setExtraClassCode] = useState("");
   const [biometricDone, setBiometricDone] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -22,7 +22,9 @@ export default function Home() {
     // 1. Get Hardcoded Routine
     const dayIndex = new Date().getDay();
     const routineRaw = WEEKLY_ROUTINE[dayIndex] || [];
-    const routine hydrated = routineRaw.map(slot => ({
+    
+    // --- FIX IS HERE: Renamed 'routine hydrated' to 'routine' ---
+    const routine = routineRaw.map(slot => ({
       ...slot,
       ...getSubjectByCode(slot.code),
       type: 'ROUTINE'
@@ -30,17 +32,14 @@ export default function Home() {
 
     // 2. Get "Active" Subjects from DB (subjects marked today)
     const dateStr = getLocalDate();
-    const res = await fetch('/api/subjects'); // You need to ensure this endpoint exists as provided before
+    const res = await fetch('/api/subjects'); 
     const allDbSubjects = await res.json();
     
     if (allDbSubjects.success) {
-      // Find subjects that have a log for TODAY
       const extras = allDbSubjects.data.filter(sub => {
-        // Check if this subject is ALREADY in the routine (avoid duplicates)
         const isInRoutine = routine.some(r => r.code === sub.code);
         if (isInRoutine) return false;
 
-        // Check if it has a log for today
         const hasLogToday = sub.attendance_logs.some(log => 
           new Date(log.date).toISOString().split('T')[0] === dateStr
         );
@@ -52,10 +51,8 @@ export default function Home() {
         type: 'EXTRA'
       }));
 
-      // 3. Merge Routine + Extras
       const finalList = [...routine, ...extras];
       
-      // Sort: Routine by time, Extras at the bottom
       finalList.sort((a, b) => {
         if (a.type === b.type) return a.time.localeCompare(b.time);
         return a.type === 'ROUTINE' ? -1 : 1;
@@ -63,7 +60,7 @@ export default function Home() {
 
       setTodayClasses(finalList);
     } else {
-      setTodayClasses(routine); // Fallback
+      setTodayClasses(routine);
     }
 
     // 3. Check Biometric
@@ -88,17 +85,13 @@ export default function Home() {
   };
 
   const handleExtraClassSelect = (code) => {
-    // When user selects an extra class, we don't just show a card.
-    // We add it to the list temporarily so they can mark it.
-    // Once marked, the loadDashboard() logic keeps it there.
     const subject = getSubjectByCode(code);
     const newClass = { ...subject, time: "Extra", type: 'EXTRA' };
     
-    // Check if already in list
     if (!todayClasses.find(c => c.code === code)) {
         setTodayClasses([...todayClasses, newClass]);
     }
-    setExtraClassCode(""); // Clear search
+    setExtraClassCode(""); 
   };
 
   const dateString = currentTime.toLocaleDateString('en-GB', { 
@@ -108,8 +101,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
-      
-      {/* Top Bar */}
       <div className="bg-white p-6 rounded-b-3xl shadow-sm mb-6 sticky top-0 z-20 flex justify-between items-start">
         <div>
            <h2 className="text-gray-500 text-sm font-semibold uppercase tracking-wider">{dateString}</h2>
@@ -118,7 +109,6 @@ export default function Home() {
         <Link href="/profile" className="bg-black text-white p-3 rounded-full shadow-lg active:scale-95 transition">👤</Link>
       </div>
 
-      {/* Biometric */}
       {!loading && !biometricDone && (
         <div className="px-4 mb-6">
           <div className="bg-red-500 text-white p-4 rounded-xl shadow-lg animate-pulse">
@@ -128,14 +118,13 @@ export default function Home() {
         </div>
       )}
 
-      {/* Routine Grid (Responsive: 1 col mobile, 2 cols tablet) */}
       <div className="px-4 mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">Today's Routine</h2>
         {todayClasses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {todayClasses.map((cls, idx) => (
               <SubjectCard 
-                key={cls.code + idx} // Unique key
+                key={cls.code + idx} 
                 subjectName={cls.name} 
                 subjectCode={cls.code} 
                 classTime={cls.time} 
@@ -148,7 +137,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Extra Class Search */}
       <div className="px-4">
         <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra Subject</h2>
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -171,4 +159,4 @@ export default function Home() {
       </div>
     </div>
   );
-        }
+      }
