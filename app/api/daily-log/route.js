@@ -3,22 +3,25 @@ import dbConnect from '@/lib/db';
 import DailyLog from '@/models/DailyLog';
 import { NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(request) {
   await dbConnect();
-  // Get today's log (using local date string)
-  const today = new Date().toISOString().split('T')[0]; 
-  const log = await DailyLog.findOne({ dateString: today });
+  // Get date from the URL (sent by your phone)
+  const { searchParams } = new URL(request.url);
+  const dateString = searchParams.get('date');
+
+  if (!dateString) return NextResponse.json({ biometric: false });
+
+  const log = await DailyLog.findOne({ dateString });
   return NextResponse.json({ success: true, biometric: log ? log.biometric_done : false });
 }
 
 export async function POST(req) {
   await dbConnect();
-  const { biometric } = await req.json();
-  const today = new Date().toISOString().split('T')[0];
+  // TRUST THE PHONE'S DATE (received from frontend)
+  const { biometric, dateString } = await req.json();
 
-  // Update or Create today's log
   await DailyLog.findOneAndUpdate(
-    { dateString: today },
+    { dateString: dateString },
     { biometric_done: biometric },
     { upsert: true, new: true }
   );
