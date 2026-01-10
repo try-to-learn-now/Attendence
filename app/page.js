@@ -7,36 +7,75 @@ import SubjectCard from '@/components/SubjectCard';
 
 export default function Home() {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [todayClasses, setTodayClasses] = useState([]);
+  const [todayClasses, setTodayClasses] = useState([]); // This now holds Routine + Extras
   const [extraClassCode, setExtraClassCode] = useState("");
   const [biometricDone, setBiometricDone] = useState(false);
+  const [loading, setLoading] = useState(true);
   
-  // HELPER: Get correct local date string (YYYY-MM-DD)
   const getLocalDate = () => {
     const d = new Date();
     const offset = d.getTimezoneOffset() * 60000;
     return new Date(d.getTime() - offset).toISOString().split('T')[0];
   };
 
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    
-    // Auto-Detect Day
+  const loadDashboard = async () => {
+    // 1. Get Hardcoded Routine
     const dayIndex = new Date().getDay();
-    const routine = WEEKLY_ROUTINE[dayIndex] || [];
-    const hydrated = routine.map(slot => ({
+    const routineRaw = WEEKLY_ROUTINE[dayIndex] || [];
+    const routine hydrated = routineRaw.map(slot => ({
       ...slot,
-      ...getSubjectByCode(slot.code)
+      ...getSubjectByCode(slot.code),
+      type: 'ROUTINE'
     }));
-    hydrated.sort((a, b) => a.time.localeCompare(b.time));
-    setTodayClasses(hydrated);
 
-    // Check Biometric (Using LOCAL Date)
+    // 2. Get "Active" Subjects from DB (subjects marked today)
     const dateStr = getLocalDate();
-    fetch(`/api/daily-log?date=${dateStr}`)
-      .then(res => res.json())
-      .then(res => setBiometricDone(res.biometric));
+    const res = await fetch('/api/subjects'); // You need to ensure this endpoint exists as provided before
+    const allDbSubjects = await res.json();
+    
+    if (allDbSubjects.success) {
+      // Find subjects that have a log for TODAY
+      const extras = allDbSubjects.data.filter(sub => {
+        // Check if this subject is ALREADY in the routine (avoid duplicates)
+        const isInRoutine = routine.some(r => r.code === sub.code);
+        if (isInRoutine) return false;
 
+        // Check if it has a log for today
+        const hasLogToday = sub.attendance_logs.some(log => 
+          new Date(log.date).toISOString().split('T')[0] === dateStr
+        );
+        return hasLogToday;
+      }).map(sub => ({
+        name: sub.name,
+        code: sub.code,
+        time: "Extra",
+        type: 'EXTRA'
+      }));
+
+      // 3. Merge Routine + Extras
+      const finalList = [...routine, ...extras];
+      
+      // Sort: Routine by time, Extras at the bottom
+      finalList.sort((a, b) => {
+        if (a.type === b.type) return a.time.localeCompare(b.time);
+        return a.type === 'ROUTINE' ? -1 : 1;
+      });
+
+      setTodayClasses(finalList);
+    } else {
+      setTodayClasses(routine); // Fallback
+    }
+
+    // 3. Check Biometric
+    const bioRes = await fetch(`/api/daily-log?date=${dateStr}`);
+    const bioData = await bioRes.json();
+    setBiometricDone(bioData.biometric);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadDashboard();
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -44,11 +83,22 @@ export default function Home() {
     setBiometricDone(true);
     await fetch('/api/daily-log', {
       method: 'POST',
-      body: JSON.stringify({ 
-        biometric: true, 
-        dateString: getLocalDate() // Send LOCAL date
-      })
+      body: JSON.stringify({ biometric: true, dateString: getLocalDate() })
     });
+  };
+
+  const handleExtraClassSelect = (code) => {
+    // When user selects an extra class, we don't just show a card.
+    // We add it to the list temporarily so they can mark it.
+    // Once marked, the loadDashboard() logic keeps it there.
+    const subject = getSubjectByCode(code);
+    const newClass = { ...subject, time: "Extra", type: 'EXTRA' };
+    
+    // Check if already in list
+    if (!todayClasses.find(c => c.code === code)) {
+        setTodayClasses([...todayClasses, newClass]);
+    }
+    setExtraClassCode(""); // Clear search
   };
 
   const dateString = currentTime.toLocaleDateString('en-GB', { 
@@ -60,7 +110,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
       
       {/* Top Bar */}
-      <div className="bg-white p-6 rounded-b-3xl shadow-sm mb-6 sticky top-0 z-10 flex justify-between items-start">
+      <div className="bg-white p-6 rounded-b-3xl shadow-sm mb-6 sticky top-0 z-20 flex justify-between items-start">
         <div>
            <h2 className="text-gray-500 text-sm font-semibold uppercase tracking-wider">{dateString}</h2>
            <h1 className="text-4xl font-black text-gray-900 mt-1">{timeString}</h1>
@@ -69,63 +119,54 @@ export default function Home() {
       </div>
 
       {/* Biometric */}
-      {!biometricDone ? (
+      {!loading && !biometricDone && (
         <div className="px-4 mb-6">
           <div className="bg-red-500 text-white p-4 rounded-xl shadow-lg animate-pulse">
             <p className="font-bold text-lg mb-2">⚠️ Mark Biometric First!</p>
             <button onClick={markBiometric} className="w-full bg-white text-red-600 py-3 rounded-lg font-bold">YES, DONE</button>
           </div>
         </div>
-      ) : (
-        <div className="px-4 mb-6">
-           <div className="bg-green-100 text-green-800 p-3 rounded-xl font-bold border border-green-200 text-center">✅ Biometric Logged</div>
-        </div>
       )}
 
-      {/* Routine */}
+      {/* Routine Grid (Responsive: 1 col mobile, 2 cols tablet) */}
       <div className="px-4 mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">Today's Routine</h2>
         {todayClasses.length > 0 ? (
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {todayClasses.map((cls, idx) => (
-              <SubjectCard key={idx} subjectName={cls.name} subjectCode={cls.code} classTime={cls.time} isScheduled={true} />
+              <SubjectCard 
+                key={cls.code + idx} // Unique key
+                subjectName={cls.name} 
+                subjectCode={cls.code} 
+                classTime={cls.time} 
+                isScheduled={cls.type === 'ROUTINE'} 
+              />
             ))}
           </div>
         ) : (
-           <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300">No Hardcoded Classes Today 😴</div>
+           <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300">No Classes Today 😴</div>
         )}
       </div>
 
-      {/* Extra Class (SMART SEARCH FIX) */}
+      {/* Extra Class Search */}
       <div className="px-4">
-        <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Extra Class?</h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra Subject</h2>
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
            <input 
              list="subjects-list" 
-             placeholder="Type 'M' for Maths..." 
+             placeholder="Search Name or Code..." 
              className="w-full text-lg font-bold border-b-2 border-gray-200 py-2 focus:outline-none focus:border-black"
              onChange={(e) => {
                 const val = e.target.value.toLowerCase();
                 const found = ALL_SUBJECTS.find(s => 
                    s.name.toLowerCase().includes(val) || s.code.toLowerCase() === val
                 );
-                if(found) setExtraClassCode(found.code);
+                if(found) handleExtraClassSelect(found.code);
              }}
            />
            <datalist id="subjects-list">
              {ALL_SUBJECTS.map(s => <option key={s.code} value={s.name}>[{s.code}]</option>)}
            </datalist>
-
-           {extraClassCode && (
-             <div className="mt-4 animate-fade-in">
-               <SubjectCard 
-                 subjectName={getSubjectByCode(extraClassCode).name} 
-                 subjectCode={extraClassCode} 
-                 classTime="Extra" 
-                 isScheduled={false} 
-               />
-             </div>
-           )}
         </div>
       </div>
     </div>
