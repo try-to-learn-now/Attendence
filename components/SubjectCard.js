@@ -1,33 +1,42 @@
 // components/SubjectCard.js
 "use client";
 import { useState, useEffect } from 'react';
+import PdfButton from './PdfButton';
 
 export default function SubjectCard({ subjectName, subjectCode, classTime, isScheduled }) {
-  const [status, setStatus] = useState(null); // 'green', 'orange', etc.
+  const [status, setStatus] = useState(null);
+  const [stats, setStats] = useState({ teacher: 0, bio: 0 });
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Fetch today's status on load
+  // Load Data on Mount
   useEffect(() => {
-    // We fetch logs for this specific subject for TODAY
     const today = new Date().toISOString().split('T')[0];
+    // Fetch Status + Stats + Logs all at once
     fetch(`/api/attendance/check?code=${subjectCode}&date=${today}`)
       .then(res => res.json())
-      .then(res => {
-        if(res.status) setStatus(res.status);
+      .then(data => {
+        setStatus(data.status);
+        setStats(data.stats);
+        setLogs(data.logs);
+        setLoading(false);
       });
   }, [subjectCode]);
 
   const mark = async (color) => {
-    setStatus(color);
+    setStatus(color); // Instant UI update
     await fetch('/api/attendance', {
       method: 'POST',
       body: JSON.stringify({
         code: subjectCode,
-        name: subjectName, // Send name just in case DB needs to create it
+        name: subjectName,
         status: color,
         date: new Date(),
-        timeSlot: classTime
+        topic: "", 
       })
     });
+    // Reload to update stats
+    window.location.reload();
   };
 
   return (
@@ -43,21 +52,28 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
         <p className="text-xs font-mono text-gray-400 mt-1">CODE: {subjectCode}</p>
       </div>
 
-      {/* Minimalist Buttons */}
-      <div className="flex gap-2">
-        <button onClick={() => mark('green')} className={`flex-1 py-3 rounded-xl font-bold text-xs transition ${status === 'green' ? 'bg-green-600 text-white shadow-lg ring-2 ring-green-200' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
-          REAL
-        </button>
-        <button onClick={() => mark('orange')} className={`flex-1 py-3 rounded-xl font-bold text-xs transition ${status === 'orange' ? 'bg-orange-500 text-white shadow-lg ring-2 ring-orange-200' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}>
-          BUNK
-        </button>
-        <button onClick={() => mark('black')} className={`flex-1 py-3 rounded-xl font-bold text-xs transition ${status === 'black' ? 'bg-gray-800 text-white shadow-lg ring-2 ring-gray-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-          PROXY
-        </button>
-        <button onClick={() => mark('red')} className={`flex-1 py-3 rounded-xl font-bold text-xs transition ${status === 'red' ? 'bg-red-600 text-white shadow-lg ring-2 ring-red-200' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}>
-          ABSENT
-        </button>
+      {/* STATS GRID (Restored from Screenshot) */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+         <div className="bg-red-50 p-2 rounded-lg text-center">
+            <p className="text-[10px] font-bold text-red-800 uppercase">Marks/Teacher</p>
+            <p className="text-xl font-black text-red-600">{stats.teacher}%</p>
+         </div>
+         <div className="bg-orange-50 p-2 rounded-lg text-center">
+            <p className="text-[10px] font-bold text-orange-800 uppercase">Biometric</p>
+            <p className="text-xl font-black text-orange-600">{stats.bio}%</p>
+         </div>
       </div>
+
+      {/* Buttons */}
+      <div className="flex gap-2 mb-3">
+        <button onClick={() => mark('green')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'green' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700'}`}>REAL</button>
+        <button onClick={() => mark('orange')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'orange' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700'}`}>BUNK</button>
+        <button onClick={() => mark('black')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'black' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700'}`}>PROXY</button>
+        <button onClick={() => mark('red')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'red' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700'}`}>ABSENT</button>
+      </div>
+
+      {/* PDF Button (Restored) */}
+      <PdfButton subjectName={subjectName} logs={logs} />
     </div>
   );
-            }
+        }
