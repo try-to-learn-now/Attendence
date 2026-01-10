@@ -7,24 +7,23 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState({ teacher: 0, bio: 0 });
   const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  // Load Data on Mount
-  useEffect(() => {
+  // Helper to refresh data WITHOUT reloading page
+  const refreshData = async () => {
     const today = new Date().toISOString().split('T')[0];
-    // Fetch Status + Stats + Logs all at once
-    fetch(`/api/attendance/check?code=${subjectCode}&date=${today}`)
-      .then(res => res.json())
-      .then(data => {
-        setStatus(data.status);
-        setStats(data.stats);
-        setLogs(data.logs);
-        setLoading(false);
-      });
+    const res = await fetch(`/api/attendance/check?code=${subjectCode}&date=${today}`);
+    const data = await res.json();
+    if(data.status) setStatus(data.status);
+    if(data.stats) setStats(data.stats);
+    if(data.logs) setLogs(data.logs);
+  };
+
+  useEffect(() => {
+    refreshData();
   }, [subjectCode]);
 
   const mark = async (color) => {
-    setStatus(color); // Instant UI update
+    setStatus(color); // Instant feedback
     await fetch('/api/attendance', {
       method: 'POST',
       body: JSON.stringify({
@@ -35,14 +34,12 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
         topic: "", 
       })
     });
-    // Reload to update stats
-    window.location.reload();
+    await refreshData(); // Background refresh
   };
 
   return (
     <div className={`relative p-5 rounded-2xl border transition-all ${status ? 'border-gray-300 bg-gray-50' : 'border-transparent bg-white shadow-md'}`}>
       
-      {/* Time Badge */}
       <div className={`absolute top-0 right-0 px-4 py-1 rounded-bl-2xl text-xs font-bold ${isScheduled ? 'bg-black text-white' : 'bg-orange-500 text-white'}`}>
         {classTime}
       </div>
@@ -52,7 +49,6 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
         <p className="text-xs font-mono text-gray-400 mt-1">CODE: {subjectCode}</p>
       </div>
 
-      {/* STATS GRID (Restored from Screenshot) */}
       <div className="grid grid-cols-2 gap-2 mb-4">
          <div className="bg-red-50 p-2 rounded-lg text-center">
             <p className="text-[10px] font-bold text-red-800 uppercase">Marks/Teacher</p>
@@ -64,7 +60,6 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
          </div>
       </div>
 
-      {/* Buttons */}
       <div className="flex gap-2 mb-3">
         <button onClick={() => mark('green')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'green' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700'}`}>REAL</button>
         <button onClick={() => mark('orange')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'orange' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700'}`}>BUNK</button>
@@ -72,8 +67,7 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
         <button onClick={() => mark('red')} className={`flex-1 py-3 rounded-xl font-bold text-xs ${status === 'red' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700'}`}>ABSENT</button>
       </div>
 
-      {/* PDF Button (Restored) */}
       <PdfButton subjectName={subjectName} logs={logs} />
     </div>
   );
-        }
+                                                                                                     }
