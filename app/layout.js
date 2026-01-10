@@ -1,10 +1,18 @@
 // app/layout.js
 import './globals.css';
 
+// 1. Metadata (Title, Description) - NO VIEWPORT HERE
 export const metadata = {
   title: 'Nitesh Attendance ERP',
   description: 'Student ERP System',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
+};
+
+// 2. Viewport (Mobile Scaling) - SEPARATE EXPORT
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  // themeColor: 'black', // Optional: Makes mobile browser bar match your app
 };
 
 export default function RootLayout({ children }) {
@@ -18,4 +26,3 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
-
