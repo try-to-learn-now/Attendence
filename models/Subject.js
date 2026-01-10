@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 
 const AttendanceLogSchema = new mongoose.Schema({
   date: { type: Date, required: true },
+  timeSlot: { type: String, required: true }, // NEW: "10:00 AM" or "04:00 PM"
   status: { 
     type: String, 
     enum: ['green', 'black', 'orange', 'red', 'grey'], 
@@ -17,10 +18,10 @@ const AttendanceLogSchema = new mongoose.Schema({
 const SubjectSchema = new mongoose.Schema({
   name: { type: String, required: true },
   code: { type: String, required: true },
-  // THIS IS THE HARDCORE ROUTINE (Saved Forever)
+  // Hardcore Routine (Static)
   schedule: [{
-    day: { type: Number, required: true }, // 0=Sun, 1=Mon, 2=Tue...
-    time: { type: String, required: true } // "10:00 AM"
+    day: { type: Number, required: true }, 
+    time: { type: String, required: true } 
   }],
   attendance_logs: [AttendanceLogSchema]
 });
