@@ -24,3 +24,14 @@ export async function POST(req) {
   }
 }
 
+// NEW: This lets you EDIT the Hardcore Routine
+export async function PUT(req) {
+  await dbConnect();
+  try {
+    const { _id, name, code, schedule } = await req.json();
+    await Subject.findByIdAndUpdate(_id, { name, code, schedule });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message });
+  }
+}
