@@ -123,4 +123,4 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
       <PdfButton subjectName={activeName} logs={logs} />
     </div>
   );
-          }
+}
