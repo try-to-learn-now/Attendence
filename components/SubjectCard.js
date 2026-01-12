@@ -12,7 +12,7 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
   const [counts, setCounts] = useState({ total: 0, present: 0 });
   const [logs, setLogs] = useState([]);
   
-  // Warning counter for Biometric Override
+  const [isSaving, setIsSaving] = useState(false);
   const [bioWarningCount, setBioWarningCount] = useState(0);
 
   const refreshData = async () => {
@@ -23,7 +23,8 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
     if(data.logs) {
         setLogs(data.logs);
         const valid = data.logs.filter(l => l.status !== 'grey').length;
-        const present = data.logs.filter(l => l.status === 'green' || l.status === 'blue' || l.status === 'orange').length;
+        // Count Green(Present), Orange(P+Proxy), Black(Proxy) as Attended
+        const present = data.logs.filter(l => ['green', 'orange', 'black'].includes(l.status)).length;
         setCounts({ total: valid, present });
     }
   };
@@ -31,19 +32,21 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
   useEffect(() => { refreshData(); }, [activeCode, selectedDate]);
 
   const mark = async (color) => {
-    // 1. BIOMETRIC CHECK (The Logic Gate)
-    const requiresBio = ['green', 'blue', 'orange'].includes(color);
+    if (isSaving) return;
+
+    // 1. BIOMETRIC LOGIC
+    // Green (Present) and Orange (P+Proxy) REQUIRE Biometric
+    const requiresBio = ['green', 'orange'].includes(color);
     
     if (requiresBio && !biometricDone) {
         if (bioWarningCount < 1) {
-            alert("⚠️ BIOMETRIC NOT DONE!\nYou cannot mark 'Real', 'Bunk', or 'Bio-Proxy' without Biometric.\n\n(If this is an Online Class, click again to force it.)");
+            alert("⚠️ BIOMETRIC MISSING!\n\nYou cannot mark 'Present' or 'P+Proxy' without Biometric.\n(Click again to force override)");
             setBioWarningCount(prev => prev + 1);
-            return; // STOP HERE
+            return;
         }
-        // If count >= 1, we allow it (User refused twice)
     }
 
-    // 2. EXTRA CLASS TIME CHECK
+    // 2. TIME LOGIC
     let finalTime = classTime;
     if (classTime === "Extra" || !isScheduled) {
         const userTime = prompt("🕒 Enter Class Time (e.g. 2:00 PM):");
@@ -54,21 +57,34 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
         finalTime = userTime;
     } 
 
+    // 3. TOPIC
+    let topic = "";
+    if (['green', 'orange'].includes(color)) {
+        topic = prompt("📝 What was taught today? (Optional)");
+    }
+
+    setIsSaving(true);
     setStatus(color);
-    setBioWarningCount(0); // Reset warning
+    setBioWarningCount(0);
     
-    await fetch('/api/attendance', {
-      method: 'POST',
-      body: JSON.stringify({
-        code: activeCode,
-        name: activeName,
-        status: color,
-        date: selectedDate,
-        timeSlot: finalTime,
-        topic: "", 
-      })
-    });
-    await refreshData();
+    try {
+        await fetch('/api/attendance', {
+          method: 'POST',
+          body: JSON.stringify({
+            code: activeCode,
+            name: activeName,
+            status: color,
+            date: selectedDate,
+            timeSlot: finalTime,
+            topic: topic || "", 
+          })
+        });
+        await refreshData();
+    } catch (error) {
+        alert("❌ Save Failed! Network Error.");
+    } finally {
+        setIsSaving(false);
+    }
   };
 
   const handleSwap = () => {
@@ -91,24 +107,24 @@ export default function SubjectCard({ subjectName, subjectCode, classTime, isSch
          <button onClick={handleSwap} className="text-gray-300 hover:text-blue-600 p-2">✎</button>
       </div>
 
-      {/* Stats */}
       <div className="flex gap-2 text-[10px] font-bold text-gray-400 mb-4 bg-gray-100 p-2 rounded-lg inline-flex">
          <span>Total: <span className="text-black">{counts.total}</span></span>
-         <span>Present: <span className="text-green-600">{counts.present}</span></span>
-         <span className="ml-2">T: {stats.teacher}% | B: {stats.bio}%</span>
+         <span>Attended: <span className="text-green-600">{counts.present}</span></span>
       </div>
 
-      {/* 6 BUTTONS GRID */}
+      {/* 5 BUTTONS GRID (Exactly as requested) */}
       <div className="grid grid-cols-3 gap-1 mb-2">
-        <button onClick={() => mark('green')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='green'?'bg-green-600 text-white':'bg-green-50 text-green-700'}`}>REAL</button>
-        <button onClick={() => mark('blue')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='blue'?'bg-blue-600 text-white':'bg-blue-50 text-blue-700'}`}>BIO-PROXY</button>
-        <button onClick={() => mark('orange')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='orange'?'bg-orange-500 text-white':'bg-orange-50 text-orange-700'}`}>BUNK</button>
-        <button onClick={() => mark('black')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='black'?'bg-gray-800 text-white':'bg-gray-100 text-gray-700'}`}>PROXY</button>
-        <button onClick={() => mark('red')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='red'?'bg-red-600 text-white':'bg-red-50 text-red-700'}`}>ABSENT</button>
-        <button onClick={() => mark('grey')} className={`py-2 rounded-lg font-bold text-[10px] ${status==='grey'?'bg-gray-400 text-white':'bg-gray-100 text-gray-500'}`}>NO CLASS</button>
+        {/* Row 1 */}
+        <button disabled={isSaving} onClick={() => mark('green')} className={`py-3 rounded-lg font-bold text-[10px] ${status==='green'?'bg-green-600 text-white':'bg-green-50 text-green-700'}`}>PRESENT</button>
+        <button disabled={isSaving} onClick={() => mark('red')} className={`py-3 rounded-lg font-bold text-[10px] ${status==='red'?'bg-red-600 text-white':'bg-red-50 text-red-700'}`}>ABSENT</button>
+        <button disabled={isSaving} onClick={() => mark('orange')} className={`py-3 rounded-lg font-bold text-[10px] ${status==='orange'?'bg-orange-500 text-white':'bg-orange-50 text-orange-700'}`}>P+PROXY</button>
+        
+        {/* Row 2 */}
+        <button disabled={isSaving} onClick={() => mark('black')} className={`py-3 rounded-lg font-bold text-[10px] ${status==='black'?'bg-black text-white':'bg-gray-200 text-gray-800'}`}>PROXY</button>
+        <button disabled={isSaving} onClick={() => mark('grey')} className={`col-span-2 py-3 rounded-lg font-bold text-[10px] ${status==='grey'?'bg-gray-500 text-white':'bg-gray-100 text-gray-500'}`}>NO CLASS</button>
       </div>
 
       <PdfButton subjectName={activeName} logs={logs} />
     </div>
   );
-}
+        }
