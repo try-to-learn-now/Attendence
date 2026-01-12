@@ -9,13 +9,12 @@ export async function POST(req) {
   const { code, name, status, topic, date, timeSlot } = await req.json();
 
   if (!code || !status || !timeSlot) {
-    return NextResponse.json({ error: "Missing required fields (Time/Code)" }, { status: 400 });
+    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
   try {
     let subject = await Subject.findOne({ code: code });
 
-    // Auto-Create if missing
     if (!subject) {
       subject = await Subject.create({
         name: name || "Unknown Subject",
@@ -24,38 +23,35 @@ export async function POST(req) {
       });
     }
 
-    // Logic Engine
     let is_bio_present = false;
     let is_teacher_present = false;
     let is_valid_class = true;
 
-    if (status === 'green') { is_bio_present = true; is_teacher_present = true; }
-    if (status === 'black') { is_bio_present = false; is_teacher_present = true; }
-    if (status === 'orange') { is_bio_present = true; is_teacher_present = false; }
-    if (status === 'red') { is_bio_present = false; is_teacher_present = false; }
-    if (status === 'grey') { is_valid_class = false; }
+    // --- NEW 6-COLOR LOGIC ---
+    if (status === 'green') { is_bio_present = true; is_teacher_present = true; }   // REAL
+    if (status === 'blue')  { is_bio_present = true; is_teacher_present = true; }   // BIO-PROXY (Friend marked, I was at school)
+    if (status === 'orange'){ is_bio_present = true; is_teacher_present = false; }  // BUNK (I was at school, missed class)
+    if (status === 'black') { is_bio_present = false; is_teacher_present = true; }  // PROXY (No Bio, Friend marked)
+    if (status === 'red')   { is_bio_present = false; is_teacher_present = false; } // ABSENT (No Bio, No Class)
+    if (status === 'grey')  { is_valid_class = false; }                             // CLOSED
 
-    // --- FIX: Check if log exists for this Date + TimeSlot ---
+    // Last Tapped Logic (Overwrite if same TimeSlot & Date)
     const logDate = new Date(date).toISOString().split('T')[0];
-    
     const existingLogIndex = subject.attendance_logs.findIndex(log => {
       const dbDate = new Date(log.date).toISOString().split('T')[0];
       return dbDate === logDate && log.timeSlot === timeSlot;
     });
 
     if (existingLogIndex > -1) {
-      // UPDATE EXISTING (Last Tapped Logic)
       subject.attendance_logs[existingLogIndex].status = status;
       subject.attendance_logs[existingLogIndex].is_bio_present = is_bio_present;
       subject.attendance_logs[existingLogIndex].is_teacher_present = is_teacher_present;
       subject.attendance_logs[existingLogIndex].is_valid_class = is_valid_class;
-      // Don't overwrite topic if empty, unless user wants to clear it? Let's keep existing if new is empty.
       if (topic) subject.attendance_logs[existingLogIndex].topic = topic;
     } else {
-      // CREATE NEW
       subject.attendance_logs.push({
         date: new Date(date),
-        timeSlot, // Saves specific time (e.g. "10:00 AM")
+        timeSlot,
         status,
         topic: topic || "",
         is_bio_present,
