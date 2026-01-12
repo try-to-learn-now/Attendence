@@ -6,7 +6,6 @@ import { WEEKLY_ROUTINE, ALL_SUBJECTS, getSubjectByCode, HOLIDAYS } from '@/lib/
 import SubjectCard from '@/components/SubjectCard';
 
 export default function Home() {
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(() => {
      const d = new Date();
      const offset = d.getTimezoneOffset() * 60000;
@@ -18,7 +17,6 @@ export default function Home() {
   const [biometricDone, setBiometricDone] = useState(false);
   const [loading, setLoading] = useState(true);
   
-  // New States
   const [isHardHoliday, setIsHardHoliday] = useState(false); 
   const [isManualHoliday, setIsManualHoliday] = useState(false);
   const [isFuture, setIsFuture] = useState(false);
@@ -29,19 +27,20 @@ export default function Home() {
     const dayIndex = dateObj.getDay(); 
     const dateMonth = selectedDate.slice(5); 
     
-    // 1. Calculate Day & Future
+    // 1. Basic Info
     const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
     setDayName(days[dayIndex]);
 
+    // Future Check
     const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset()*60000).toISOString().split('T')[0];
     setIsFuture(selectedDate > todayStr);
 
-    // 2. Check Auto-Holiday (Sunday/Calendar)
+    // Holiday Check
     const isSunday = dayIndex === 0;
     const isGovHoliday = HOLIDAYS.includes(dateMonth);
     setIsHardHoliday(isSunday || isGovHoliday);
 
-    // 3. Load Routine
+    // 2. Routine
     const routineRaw = WEEKLY_ROUTINE[dayIndex] || [];
     const routine = routineRaw.map(slot => ({
       ...slot,
@@ -49,7 +48,7 @@ export default function Home() {
       type: 'ROUTINE'
     }));
 
-    // 4. Fetch DB Data (Subjects)
+    // 3. Database Sync
     const res = await fetch('/api/subjects'); 
     const allDbSubjects = await res.json();
     
@@ -60,16 +59,23 @@ export default function Home() {
             new Date(log.date).toISOString().split('T')[0] === selectedDate
         );
         todaysLogs.forEach(log => {
+            // Find if this log belongs to a routine class
             const isRoutine = routine.some(r => r.code === sub.code && r.time === log.timeSlot);
+            
             if (!isRoutine) {
+                // If not routine, it's Extra
                 if (!extras.some(e => e.code === sub.code && e.time === log.timeSlot)) {
                     extras.push({
-                        name: sub.name, code: sub.code, time: log.timeSlot || "Extra", type: 'EXTRA'
+                        name: sub.name, 
+                        code: sub.code, 
+                        time: log.timeSlot || "Extra", 
+                        type: 'EXTRA'
                     });
                 }
             }
         });
       });
+      
       const finalList = [...routine, ...extras];
       finalList.sort((a, b) => a.time.localeCompare(b.time));
       setTodayClasses(finalList);
@@ -77,7 +83,7 @@ export default function Home() {
       setTodayClasses(routine);
     }
 
-    // 5. Fetch Daily Log (Bio + Manual Holiday)
+    // 4. Biometric Sync
     const bioRes = await fetch(`/api/daily-log?date=${selectedDate}`);
     const bioData = await bioRes.json();
     setBiometricDone(bioData.biometric);
@@ -88,16 +94,15 @@ export default function Home() {
   useEffect(() => {
     setLoading(true);
     loadDashboard();
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
   }, [selectedDate]);
 
-  const markBiometric = async () => {
+  const toggleBiometric = async () => {
     if(isFuture) return;
-    setBiometricDone(true);
+    const newState = !biometricDone;
+    setBiometricDone(newState);
     await fetch('/api/daily-log', {
       method: 'POST',
-      body: JSON.stringify({ biometric: true, dateString: selectedDate })
+      body: JSON.stringify({ biometric: newState, dateString: selectedDate })
     });
   };
 
@@ -119,24 +124,29 @@ export default function Home() {
     setExtraClassCode(""); 
   };
 
-  const timeString = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const isHoliday = isHardHoliday || isManualHoliday;
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
       
-      {/* Top Bar */}
+      {/* Top Header */}
       <div className="bg-white p-6 rounded-b-3xl shadow-sm mb-4 sticky top-0 z-20">
-        <div className="flex justify-between items-start mb-2">
+        <div className="flex justify-between items-center mb-2">
           <div>
-             <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="text-gray-500 font-bold bg-transparent outline-none"/>
-             <h1 className="text-4xl font-black text-gray-900 mt-1">{timeString}</h1>
+             {/* Date Picker */}
+             <input 
+               type="date" 
+               value={selectedDate} 
+               onChange={(e) => setSelectedDate(e.target.value)} 
+               className="text-2xl font-black text-gray-900 bg-transparent outline-none w-full"
+             />
              <p className="text-sm font-bold text-blue-600 tracking-widest mt-1 uppercase">{dayName}</p>
           </div>
-          <Link href="/profile" className="bg-black text-white p-3 rounded-full">👤</Link>
+          <Link href="/profile" className="bg-black text-white p-3 rounded-full shadow-lg">👤</Link>
         </div>
       </div>
 
+      {/* WARNINGS */}
       {isFuture && (
          <div className="px-4 mb-4"><div className="bg-gray-200 text-gray-600 p-3 rounded-xl font-bold text-center">🔮 Future Date (Read Only)</div></div>
       )}
@@ -144,37 +154,48 @@ export default function Home() {
       {isHoliday && !isFuture && (
         <div className="px-4 mb-4">
             <div className="bg-purple-100 text-purple-800 p-4 rounded-xl font-bold text-center border border-purple-200 shadow-sm">
-                🎉 HOLIDAY / WEEKEND<br/><span className="text-[10px] font-normal opacity-75">(Classes Optional)</span>
+                🎉 HOLIDAY / WEEKEND
             </div>
         </div>
       )}
 
+      {/* CONTROLS (Bio & Holiday) */}
       {!loading && !isFuture && (
-        <div className="px-4 mb-6 grid gap-2">
-            {!biometricDone ? (
-                <div className="bg-red-500 text-white p-4 rounded-xl shadow-lg flex justify-between items-center">
-                    <span className="font-bold">⚠️ Mark Biometric</span>
-                    <button onClick={markBiometric} className="bg-white text-red-600 px-4 py-2 rounded-lg font-bold text-sm">DONE</button>
-                </div>
-            ) : (
-                <div className="bg-green-100 text-green-800 p-3 rounded-xl font-bold text-center border border-green-200">✅ Biometric Logged</div>
-            )}
+        <div className="px-4 mb-6 grid grid-cols-2 gap-2">
+            {/* Biometric Toggle */}
+            <button 
+                onClick={toggleBiometric}
+                className={`py-3 rounded-xl font-bold text-sm shadow-sm transition-all ${
+                    biometricDone 
+                    ? 'bg-green-100 text-green-700 border border-green-200' 
+                    : 'bg-red-500 text-white animate-pulse'
+                }`}
+            >
+                {biometricDone ? "✅ Bio Done" : "⚠️ Mark Bio"}
+            </button>
+
+            {/* Holiday Toggle */}
             <button 
                 onClick={toggleManualHoliday}
-                className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${isManualHoliday ? 'bg-purple-600 text-white shadow-lg' : 'bg-white border border-purple-200 text-purple-600'}`}
+                className={`py-3 rounded-xl font-bold text-sm shadow-sm transition-all ${
+                    isManualHoliday 
+                    ? 'bg-purple-600 text-white' 
+                    : 'bg-white border border-gray-200 text-gray-500'
+                }`}
             >
-                {isManualHoliday ? "Cancel Holiday Override ❌" : "Mark Today as Holiday 🎉"}
+                {isManualHoliday ? "Holiday On" : "Mark Holiday"}
             </button>
         </div>
       )}
 
+      {/* CLASSES LIST */}
       <div className="px-4 mb-8">
         <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">Schedule</h2>
         {todayClasses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {todayClasses.map((cls, idx) => (
               <SubjectCard 
-                key={cls.code + idx} 
+                key={cls.code + idx + cls.time} // Unique Key Fix
                 subjectName={cls.name} 
                 subjectCode={cls.code} 
                 classTime={cls.time} 
@@ -190,23 +211,27 @@ export default function Home() {
         )}
       </div>
 
+      {/* EXTRA CLASS INPUT */}
       {!isFuture && (
           <div className="px-4">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra / Swap</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra Class</h2>
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-            <input list="subjects-list" placeholder="Search Name or Code..." className="w-full text-lg font-bold border-b-2 border-gray-200 py-2 outline-none"
-                onChange={(e) => {
-                    const val = e.target.value.toLowerCase();
-                    const found = ALL_SUBJECTS.find(s => s.name.toLowerCase().includes(val) || s.code.toLowerCase() === val);
-                    if(found) handleExtraClassSelect(found.code);
-                }}
-            />
-            <datalist id="subjects-list">
-                {ALL_SUBJECTS.map(s => <option key={s.code} value={s.name}>[{s.code}]</option>)}
-            </datalist>
+                <input 
+                    list="subjects-list" 
+                    placeholder="Search Name or Code..." 
+                    className="w-full text-lg font-bold border-b-2 border-gray-200 py-2 outline-none"
+                    onChange={(e) => {
+                        const val = e.target.value.toLowerCase();
+                        const found = ALL_SUBJECTS.find(s => s.name.toLowerCase().includes(val) || s.code.toLowerCase() === val);
+                        if(found) handleExtraClassSelect(found.code);
+                    }}
+                />
+                <datalist id="subjects-list">
+                    {ALL_SUBJECTS.map(s => <option key={s.code} value={s.name}>[{s.code}]</option>)}
+                </datalist>
             </div>
           </div>
       )}
     </div>
   );
-                              }
+                  }
