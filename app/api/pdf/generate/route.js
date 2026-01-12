@@ -14,28 +14,40 @@ export async function GET(request) {
   const subjects = await Subject.find({});
   const dailyLogs = await DailyLog.find({});
 
+  // 1. Better CSS for the Table
   let htmlContent = `
     <html>
       <head>
-        <title>Attendance Report</title>
+        <title>Nitesh ERP Report</title>
         <style>
-          body { font-family: sans-serif; padding: 20px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          .green { color: green; font-weight: bold; }
-          .orange { color: orange; font-weight: bold; }
-          .red { color: red; font-weight: bold; }
-          .black { color: black; font-weight: bold; text-decoration: underline; }
+          body { font-family: sans-serif; padding: 20px; font-size: 12px; }
+          h1 { margin-bottom: 5px; }
+          p { color: #666; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th { background-color: #f3f4f6; text-align: left; padding: 10px; border-bottom: 2px solid #ddd; }
+          td { border-bottom: 1px solid #eee; padding: 10px; vertical-align: middle; }
+          
+          /* Status Colors */
+          .status-tag { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 10px; }
+          .green { background: #dcfce7; color: #166534; }   /* Present */
+          .orange { background: #ffedd5; color: #9a3412; }  /* P+Proxy */
+          .black { background: #f3f4f6; color: #1f2937; }   /* Proxy */
+          .red { background: #fee2e2; color: #991b1b; }     /* Absent */
+          .grey { color: #9ca3af; }                          /* No Class */
         </style>
       </head>
       <body>
-        <h1>Nitesh ERP Report</h1>
-        <p>Type: ${type}</p>
-        <p>Generated: ${new Date().toLocaleString()}</p>
+        <h1>Attendance Report</h1>
+        <p>Type: <strong>${type}</strong> | Generated: ${new Date().toLocaleString()}</p>
+        
         <table>
           <thead>
-            <tr><th>Date</th><th>Subject</th><th>Status</th><th>Type</th></tr>
+            <tr>
+              <th style="width: 40%">Subject</th>
+              <th style="width: 20%">Date</th>
+              <th style="width: 20%">Time</th>
+              <th style="width: 20%">Status</th>
+            </tr>
           </thead>
           <tbody>
   `;
@@ -48,28 +60,51 @@ export async function GET(request) {
         dateStr: new Date(log.date).toLocaleDateString(),
         subject: sub.name,
         code: sub.code,
+        time: log.timeSlot || "-",
         status: log.status,
-        type: log.status === 'green' ? 'PRESENT' : (log.status === 'orange' ? 'P+PROXY' : (log.status === 'black' ? 'PROXY' : 'ABSENT'))
       });
     });
   });
 
+  // Sort by Date (Newest First)
   allLogs.sort((a, b) => b.dateObj - a.dateObj);
 
   if (type === 'BIO_ONLY') {
     dailyLogs.forEach(log => {
-      htmlContent += `<tr><td>${log.dateString}</td><td>BIOMETRIC</td><td>${log.biometric_done ? 'DONE' : 'MISSED'}</td><td>-</td></tr>`;
+      htmlContent += `
+        <tr>
+          <td><strong>BIOMETRIC LOG</strong></td>
+          <td>${log.dateString}</td>
+          <td>-</td>
+          <td>${log.biometric_done ? '✅ DONE' : '❌ MISSED'}</td>
+        </tr>`;
     });
   } else {
-    let lastDate = "";
     allLogs.forEach(log => {
-      if (type === 'REAL_BUNK' && (log.status !== 'green' && log.status !== 'orange')) return;
-      
-      const displayDate = log.dateStr === lastDate ? "" : log.dateStr;
-      lastDate = log.dateStr;
-      let colorClass = log.status === 'green' ? 'green' : (log.status === 'red' ? 'red' : 'orange');
+      // Filter Logic
+      if (type === 'REAL_BUNK' && !['green', 'orange'].includes(log.status)) return;
 
-      htmlContent += `<tr><td>${displayDate}</td><td>${log.subject}</td><td class="${colorClass}">${log.status.toUpperCase()}</td><td>${log.type}</td></tr>`;
+      // Status Label Logic
+      let label = "UNKNOWN";
+      let colorClass = "grey";
+      
+      if (log.status === 'green') { label = "PRESENT"; colorClass = "green"; }
+      if (log.status === 'orange') { label = "P+PROXY"; colorClass = "orange"; }
+      if (log.status === 'black') { label = "PROXY"; colorClass = "black"; }
+      if (log.status === 'red') { label = "ABSENT"; colorClass = "red"; }
+      if (log.status === 'grey') { label = "NO CLASS"; colorClass = "grey"; }
+
+      htmlContent += `
+        <tr>
+          <td>
+            <div style="font-weight:bold">${log.subject}</div>
+            <div style="font-size:10px; color:#999">${log.code}</div>
+          </td>
+          <td>${log.dateStr}</td>
+          <td>${log.time}</td>
+          <td><span class="status-tag ${colorClass}">${label}</span></td>
+        </tr>
+      `;
     });
   }
 
