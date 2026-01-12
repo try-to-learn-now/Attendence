@@ -10,22 +10,30 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const dateString = searchParams.get('date');
 
-  if (!dateString) return NextResponse.json({ biometric: false });
+  if (!dateString) return NextResponse.json({ biometric: false, is_holiday: false });
 
   const log = await DailyLog.findOne({ dateString });
-  return NextResponse.json({ success: true, biometric: log ? log.biometric_done : false });
+  return NextResponse.json({ 
+    success: true, 
+    biometric: log ? log.biometric_done : false,
+    is_holiday: log ? log.is_holiday : false 
+  });
 }
 
 export async function POST(req) {
   await dbConnect();
-  // ACCEPT THE DATE FROM FRONTEND (Fixes Timezone)
-  const { biometric, dateString } = await req.json();
+  const { biometric, is_holiday, dateString } = await req.json();
 
   if (!dateString) return NextResponse.json({ error: "Date required" }, { status: 400 });
 
+  // Construct update object dynamically
+  let updateData = {};
+  if (typeof biometric !== 'undefined') updateData.biometric_done = biometric;
+  if (typeof is_holiday !== 'undefined') updateData.is_holiday = is_holiday;
+
   await DailyLog.findOneAndUpdate(
     { dateString: dateString },
-    { biometric_done: biometric },
+    updateData,
     { upsert: true, new: true }
   );
   
