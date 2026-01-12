@@ -18,9 +18,9 @@ export default function Home() {
   const [biometricDone, setBiometricDone] = useState(false);
   const [loading, setLoading] = useState(true);
   
-  // Status Flags
-  const [isHardHoliday, setIsHardHoliday] = useState(false); // Code/Sunday
-  const [isManualHoliday, setIsManualHoliday] = useState(false); // MongoDB
+  // New States
+  const [isHardHoliday, setIsHardHoliday] = useState(false); 
+  const [isManualHoliday, setIsManualHoliday] = useState(false);
   const [isFuture, setIsFuture] = useState(false);
   const [dayName, setDayName] = useState("");
 
@@ -29,14 +29,14 @@ export default function Home() {
     const dayIndex = dateObj.getDay(); 
     const dateMonth = selectedDate.slice(5); 
     
-    // 1. Calculate Day Name & Future
+    // 1. Calculate Day & Future
     const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
     setDayName(days[dayIndex]);
 
     const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset()*60000).toISOString().split('T')[0];
     setIsFuture(selectedDate > todayStr);
 
-    // 2. Hardcoded Holiday Check
+    // 2. Check Auto-Holiday (Sunday/Calendar)
     const isSunday = dayIndex === 0;
     const isGovHoliday = HOLIDAYS.includes(dateMonth);
     setIsHardHoliday(isSunday || isGovHoliday);
@@ -49,7 +49,7 @@ export default function Home() {
       type: 'ROUTINE'
     }));
 
-    // 4. Fetch DB Data (Subjects + Logs)
+    // 4. Fetch DB Data (Subjects)
     const res = await fetch('/api/subjects'); 
     const allDbSubjects = await res.json();
     
@@ -77,7 +77,7 @@ export default function Home() {
       setTodayClasses(routine);
     }
 
-    // 5. Fetch Daily Log (Biometric + Manual Holiday)
+    // 5. Fetch Daily Log (Bio + Manual Holiday)
     const bioRes = await fetch(`/api/daily-log?date=${selectedDate}`);
     const bioData = await bioRes.json();
     setBiometricDone(bioData.biometric);
@@ -137,7 +137,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Warning Banners */}
       {isFuture && (
          <div className="px-4 mb-4"><div className="bg-gray-200 text-gray-600 p-3 rounded-xl font-bold text-center">🔮 Future Date (Read Only)</div></div>
       )}
@@ -150,11 +149,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Action Area (Biometric & Holiday) */}
       {!loading && !isFuture && (
         <div className="px-4 mb-6 grid gap-2">
-            
-            {/* Biometric Status */}
             {!biometricDone ? (
                 <div className="bg-red-500 text-white p-4 rounded-xl shadow-lg flex justify-between items-center">
                     <span className="font-bold">⚠️ Mark Biometric</span>
@@ -163,8 +159,6 @@ export default function Home() {
             ) : (
                 <div className="bg-green-100 text-green-800 p-3 rounded-xl font-bold text-center border border-green-200">✅ Biometric Logged</div>
             )}
-
-            {/* Manual Holiday Toggle */}
             <button 
                 onClick={toggleManualHoliday}
                 className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${isManualHoliday ? 'bg-purple-600 text-white shadow-lg' : 'bg-white border border-purple-200 text-purple-600'}`}
@@ -174,11 +168,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Routine */}
       <div className="px-4 mb-8">
-        <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">
-            Schedule
-        </h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">Schedule</h2>
         {todayClasses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {todayClasses.map((cls, idx) => (
@@ -190,7 +181,7 @@ export default function Home() {
                 isScheduled={cls.type === 'ROUTINE'} 
                 selectedDate={selectedDate}
                 biometricDone={biometricDone}
-                isFuture={isFuture} // Lock future cards
+                isFuture={isFuture} 
               />
             ))}
           </div>
@@ -199,7 +190,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Add Extra */}
       {!isFuture && (
           <div className="px-4">
             <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra / Swap</h2>
@@ -219,4 +209,4 @@ export default function Home() {
       )}
     </div>
   );
-      }
+                              }
