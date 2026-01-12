@@ -49,7 +49,7 @@ export async function GET(request) {
         subject: sub.name,
         code: sub.code,
         status: log.status,
-        type: log.status === 'green' ? 'REAL' : (log.status === 'orange' ? 'BUNK' : (log.status === 'black' ? 'PROXY' : 'ABSENT'))
+        type: log.status === 'green' ? 'PRESENT' : (log.status === 'orange' ? 'P+PROXY' : (log.status === 'black' ? 'PROXY' : 'ABSENT'))
       });
     });
   });
