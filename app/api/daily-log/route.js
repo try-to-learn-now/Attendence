@@ -26,7 +26,6 @@ export async function POST(req) {
 
   if (!dateString) return NextResponse.json({ error: "Date required" }, { status: 400 });
 
-  // Construct update object dynamically
   let updateData = {};
   if (typeof biometric !== 'undefined') updateData.biometric_done = biometric;
   if (typeof is_holiday !== 'undefined') updateData.is_holiday = is_holiday;
