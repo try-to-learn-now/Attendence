@@ -1,237 +1,371 @@
 // app/page.js
 "use client";
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { WEEKLY_ROUTINE, ALL_SUBJECTS, getSubjectByCode, HOLIDAYS } from '@/lib/universal_data';
-import SubjectCard from '@/components/SubjectCard';
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { WEEKLY_ROUTINE, ALL_SUBJECTS, getSubjectByCode, HOLIDAYS } from "@/lib/universal_data";
+import SubjectCard from "@/components/SubjectCard";
+
+function todayISO() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().split("T")[0];
+}
+
+function time12ToMinutes(t) {
+  // "02:00 PM"
+  const [hm, ap] = t.trim().split(" ");
+  const [hStr, mStr] = hm.split(":");
+  let h = Number(hStr);
+  const m = Number(mStr);
+  if (ap === "PM" && h !== 12) h += 12;
+  if (ap === "AM" && h === 12) h = 0;
+  return h * 60 + m;
+}
+
+function timeInputTo12h(val) {
+  // "14:00" => "02:00 PM"
+  if (!val) return "";
+  const [hh, mm] = val.split(":").map(Number);
+  const total = hh * 60 + mm;
+  const h24 = Math.floor(total / 60);
+  const m = total % 60;
+  const ap = h24 >= 12 ? "PM" : "AM";
+  let h = h24 % 12;
+  if (h === 0) h = 12;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ap}`;
+}
 
 export default function Home() {
-  const [selectedDate, setSelectedDate] = useState(() => {
-     const d = new Date();
-     const offset = d.getTimezoneOffset() * 60000;
-     return new Date(d.getTime() - offset).toISOString().split('T')[0];
-  });
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const [todayClasses, setTodayClasses] = useState([]); 
-  const [extraClassCode, setExtraClassCode] = useState("");
-  const [biometricDone, setBiometricDone] = useState(false);
-  const [loading, setLoading] = useState(true);
-  
-  const [isHardHoliday, setIsHardHoliday] = useState(false); 
-  const [isManualHoliday, setIsManualHoliday] = useState(false);
-  const [isFuture, setIsFuture] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => todayISO());
   const [dayName, setDayName] = useState("");
 
-  const loadDashboard = async () => {
+  const [todayClasses, setTodayClasses] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [biometricDone, setBiometricDone] = useState(false);
+  const [isHardHoliday, setIsHardHoliday] = useState(false);
+  const [isManualHoliday, setIsManualHoliday] = useState(false);
+  const [isFuture, setIsFuture] = useState(false);
+
+  const [dailySwaps, setDailySwaps] = useState([]);
+  const [dailyExtras, setDailyExtras] = useState([]);
+
+  // Extra class UI
+  const [extraTime, setExtraTime] = useState(""); // input type=time
+  const [extraCode, setExtraCode] = useState("");
+
+  const isHoliday = isHardHoliday || isManualHoliday;
+
+  async function refreshDashboard() {
+    setLoading(true);
+
     const dateObj = new Date(selectedDate);
-    const dayIndex = dateObj.getDay(); 
-    const dateMonth = selectedDate.slice(5); 
-    
-    // 1. Basic Info
-    const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    const dayIndex = dateObj.getDay();
+    const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
     setDayName(days[dayIndex]);
 
-    // Future Check
-    const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset()*60000).toISOString().split('T')[0];
-    setIsFuture(selectedDate > todayStr);
+    // future check
+    const t = todayISO();
+    setIsFuture(selectedDate > t);
 
-    // Holiday Check
+    // hard holiday check
+    const dateMonth = selectedDate.slice(5);
     const isSunday = dayIndex === 0;
     const isGovHoliday = HOLIDAYS.includes(dateMonth);
     setIsHardHoliday(isSunday || isGovHoliday);
 
-    // 2. Routine
+    // routine
     const routineRaw = WEEKLY_ROUTINE[dayIndex] || [];
-    const routine = routineRaw.map(slot => ({
-      ...slot,
-      ...getSubjectByCode(slot.code),
-      type: 'ROUTINE'
-    }));
+    let routine = routineRaw.map((slot) => {
+      const sub = getSubjectByCode(slot.code);
+      return {
+        time: slot.time,
+        type: "ROUTINE",
+        scheduledCode: slot.code,
+        code: slot.code,
+        name: sub.name,
+      };
+    });
 
-    // 3. Database Sync
-    const res = await fetch('/api/subjects'); 
-    const allDbSubjects = await res.json();
-    
-    if (allDbSubjects.success) {
-      const extras = [];
-      allDbSubjects.data.forEach(sub => {
-        const todaysLogs = sub.attendance_logs.filter(log => 
-            new Date(log.date).toISOString().split('T')[0] === selectedDate
-        );
-        todaysLogs.forEach(log => {
-            // Find if this log belongs to a routine class
-            const isRoutine = routine.some(r => r.code === sub.code && r.time === log.timeSlot);
-            
-            if (!isRoutine) {
-                // If not routine, it's Extra
-                if (!extras.some(e => e.code === sub.code && e.time === log.timeSlot)) {
-                    extras.push({
-                        name: sub.name, 
-                        code: sub.code, 
-                        time: log.timeSlot || "Extra", 
-                        type: 'EXTRA'
-                    });
-                }
-            }
-        });
-      });
-      
-      const finalList = [...routine, ...extras];
-      finalList.sort((a, b) => a.time.localeCompare(b.time));
-      setTodayClasses(finalList);
-    } else {
-      setTodayClasses(routine);
-    }
-
-    // 4. Biometric Sync
+    // daily log (bio/holiday/swaps/extras)
     const bioRes = await fetch(`/api/daily-log?date=${selectedDate}`);
     const bioData = await bioRes.json();
-    setBiometricDone(bioData.biometric);
-    setIsManualHoliday(bioData.is_holiday);
+    setBiometricDone(Boolean(bioData?.biometric));
+    setIsManualHoliday(Boolean(bioData?.is_holiday));
+    setDailySwaps(bioData?.swaps || []);
+    setDailyExtras(bioData?.extras || []);
+
+    // apply swaps to routine
+    routine = routine.map((cls) => {
+      const sw = (bioData?.swaps || []).find((s) => s.timeSlot === cls.time);
+      if (!sw) return cls;
+
+      const actual = getSubjectByCode(sw.toCode);
+      return {
+        ...cls,
+        type: "SWAP",
+        code: sw.toCode,
+        name: actual.name,
+      };
+    });
+
+    // extras from daily log
+    const extras = (bioData?.extras || []).map((e) => {
+      const sub = getSubjectByCode(e.code);
+      return { time: e.timeSlot, type: "EXTRA", code: e.code, name: sub.name, scheduledCode: "" };
+    });
+
+    // merge + sort (AM/PM correct)
+    let finalList = [...routine, ...extras];
+    finalList.sort((a, b) => time12ToMinutes(a.time) - time12ToMinutes(b.time));
+
+    // period numbering
+    finalList = finalList.map((c, idx) => ({ ...c, period: idx + 1 }));
+
+    setTodayClasses(finalList);
     setLoading(false);
-  };
+  }
 
   useEffect(() => {
-    setLoading(true);
-    loadDashboard();
+    refreshDashboard();
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
-  const toggleBiometric = async () => {
-    if(isFuture) return;
+  async function toggleBiometric() {
+    if (isFuture) return;
     const newState = !biometricDone;
     setBiometricDone(newState);
-    await fetch('/api/daily-log', {
-      method: 'POST',
-      body: JSON.stringify({ biometric: newState, dateString: selectedDate })
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ biometric: newState, dateString: selectedDate }),
     });
-  };
+  }
 
-  const toggleManualHoliday = async () => {
-    if(isFuture) return;
+  async function toggleManualHoliday() {
+    if (isFuture) return;
     const newState = !isManualHoliday;
     setIsManualHoliday(newState);
-    await fetch('/api/daily-log', {
-      method: 'POST',
-      body: JSON.stringify({ is_holiday: newState, dateString: selectedDate })
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_holiday: newState, dateString: selectedDate }),
     });
-  };
+  }
 
-  const handleExtraClassSelect = (code) => {
-    if(isFuture) return;
-    const subject = getSubjectByCode(code);
-    const newClass = { ...subject, time: "Extra", type: 'EXTRA' };
-    setTodayClasses([...todayClasses, newClass]);
-    setExtraClassCode(""); 
-  };
+  async function addExtraClass() {
+    if (isFuture) return;
 
-  const isHoliday = isHardHoliday || isManualHoliday;
+    const timeSlot = timeInputTo12h(extraTime);
+    if (!timeSlot || !extraCode) return;
+
+    // conflict with existing routine time => suggest swap
+    const hasRoutineAtTime = todayClasses.some((c) => c.time === timeSlot && c.type !== "EXTRA");
+    if (hasRoutineAtTime) {
+      // default behavior: swap
+      const routineAt = todayClasses.find((c) => c.time === timeSlot && c.type !== "EXTRA");
+      await fetch("/api/daily-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateString: selectedDate,
+          swap: { timeSlot, fromCode: routineAt.scheduledCode, toCode: extraCode },
+        }),
+      });
+    } else {
+      // real extra
+      await fetch("/api/daily-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateString: selectedDate, extra: { timeSlot, code: extraCode } }),
+      });
+    }
+
+    setExtraTime("");
+    setExtraCode("");
+    refreshDashboard();
+  }
+
+  // ongoing highlight logic: only for today
+  const ongoingTime = useMemo(() => {
+    const isToday = selectedDate === todayISO();
+    if (!isToday) return null;
+    return currentTime.getHours() * 60 + currentTime.getMinutes();
+  }, [currentTime, selectedDate]);
+
+  const ongoingSlot = useMemo(() => {
+    if (ongoingTime == null || todayClasses.length === 0) return null;
+
+    const sorted = [...todayClasses].sort((a, b) => time12ToMinutes(a.time) - time12ToMinutes(b.time));
+    for (let i = 0; i < sorted.length; i++) {
+      const start = time12ToMinutes(sorted[i].time);
+      const end = i < sorted.length - 1 ? time12ToMinutes(sorted[i + 1].time) : start + 60;
+      if (ongoingTime >= start && ongoingTime < end) return sorted[i].time;
+    }
+    return null;
+  }, [ongoingTime, todayClasses]);
+
+  async function markAllNoClass() {
+    // If you want auto NO CLASS on holiday
+    for (const cls of todayClasses) {
+      await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: cls.code,
+          name: cls.name,
+          status: "grey",
+          topic: "",
+          date: selectedDate,
+          timeSlot: cls.time,
+          scheduledCode: cls.scheduledCode || "",
+        }),
+      });
+    }
+  }
+
+  const timeString = currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24 font-sans">
-      
-      {/* Top Header */}
-      <div className="bg-white p-6 rounded-b-3xl shadow-sm mb-4 sticky top-0 z-20">
-        <div className="flex justify-between items-center mb-2">
-          <div>
-             {/* Date Picker */}
-             <input 
-               type="date" 
-               value={selectedDate} 
-               onChange={(e) => setSelectedDate(e.target.value)} 
-               className="text-2xl font-black text-gray-900 bg-transparent outline-none w-full"
-             />
-             <p className="text-sm font-bold text-blue-600 tracking-widest mt-1 uppercase">{dayName}</p>
+    <div className="max-w-5xl mx-auto p-4">
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1 bg-white rounded-2xl border border-gray-100 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="text-lg font-black text-gray-900 bg-transparent outline-none"
+            />
+            <button
+              onClick={() => setSelectedDate(todayISO())}
+              className="px-3 py-1 rounded-xl text-xs font-black border border-gray-200"
+            >
+              Today
+            </button>
           </div>
-          <Link href="/profile" className="bg-black text-white p-3 rounded-full shadow-lg">👤</Link>
+          <div className="mt-1 text-xs font-bold text-gray-500">{dayName} • {timeString}</div>
         </div>
+
+        <Link href="/profile" className="bg-white border border-gray-100 rounded-2xl p-3 font-black">
+          👤
+        </Link>
       </div>
 
-      {/* WARNINGS */}
-      {isFuture && (
-         <div className="px-4 mb-4"><div className="bg-gray-200 text-gray-600 p-3 rounded-xl font-bold text-center">🔮 Future Date (Read Only)</div></div>
-      )}
-
-      {isHoliday && !isFuture && (
-        <div className="px-4 mb-4">
-            <div className="bg-purple-100 text-purple-800 p-4 rounded-xl font-bold text-center border border-purple-200 shadow-sm">
-                🎉 HOLIDAY / WEEKEND
-            </div>
-        </div>
-      )}
-
-      {/* CONTROLS (Bio & Holiday) */}
-      {!loading && !isFuture && (
-        <div className="px-4 mb-6 grid grid-cols-2 gap-2">
-            {/* Biometric Toggle */}
-            <button 
-                onClick={toggleBiometric}
-                className={`py-3 rounded-xl font-bold text-sm shadow-sm transition-all ${
-                    biometricDone 
-                    ? 'bg-green-100 text-green-700 border border-green-200' 
-                    : 'bg-red-500 text-white animate-pulse'
-                }`}
-            >
-                {biometricDone ? "✅ Bio Done" : "⚠️ Mark Bio"}
-            </button>
-
-            {/* Holiday Toggle */}
-            <button 
-                onClick={toggleManualHoliday}
-                className={`py-3 rounded-xl font-bold text-sm shadow-sm transition-all ${
-                    isManualHoliday 
-                    ? 'bg-purple-600 text-white' 
-                    : 'bg-white border border-gray-200 text-gray-500'
-                }`}
-            >
-                {isManualHoliday ? "Holiday On" : "Mark Holiday"}
-            </button>
-        </div>
-      )}
-
-      {/* CLASSES LIST */}
-      <div className="px-4 mb-8">
-        <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-blue-600 pl-2">Schedule</h2>
-        {todayClasses.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {todayClasses.map((cls, idx) => (
-              <SubjectCard 
-                key={cls.code + idx + cls.time} // Unique Key Fix
-                subjectName={cls.name} 
-                subjectCode={cls.code} 
-                classTime={cls.time} 
-                isScheduled={cls.type === 'ROUTINE'} 
-                selectedDate={selectedDate}
-                biometricDone={biometricDone}
-                isFuture={isFuture} 
-              />
-            ))}
+      {/* banners */}
+      <div className="mt-3 space-y-2">
+        {isFuture && (
+          <div className="bg-yellow-50 text-yellow-900 border border-yellow-100 rounded-2xl p-3 font-black">
+            Future date (read-only)
           </div>
-        ) : (
-           <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300">No Classes Found</div>
+        )}
+        {isHoliday && !isFuture && (
+          <div className="bg-orange-50 text-orange-900 border border-orange-100 rounded-2xl p-3 font-black">
+            Holiday / Weekend — marking locked
+            <button
+              onClick={markAllNoClass}
+              className="ml-3 px-3 py-1 rounded-xl text-xs font-black border border-orange-200"
+            >
+              Mark all as NO CLASS
+            </button>
+          </div>
         )}
       </div>
 
-      {/* EXTRA CLASS INPUT */}
+      {/* controls */}
+      {!loading && !isFuture && (
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={toggleBiometric}
+            className={`flex-1 py-3 rounded-2xl font-black ${
+              biometricDone ? "bg-green-600 text-white" : "bg-red-500 text-white"
+            }`}
+          >
+            {biometricDone ? "✅ Bio Done" : "⚠️ Mark Bio"}
+          </button>
+
+          <button
+            onClick={toggleManualHoliday}
+            className={`flex-1 py-3 rounded-2xl font-black border ${
+              isManualHoliday ? "bg-black text-white border-black" : "bg-white text-gray-700 border-gray-200"
+            }`}
+          >
+            {isManualHoliday ? "Holiday ON" : "Mark Holiday"}
+          </button>
+        </div>
+      )}
+
+      {/* schedule */}
+      <h2 className="mt-5 text-xl font-black">Schedule</h2>
+
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {todayClasses.map((cls) => (
+          <SubjectCard
+            key={`${cls.time}-${cls.code}-${cls.type}`}
+            period={cls.period}
+            classTime={cls.time}
+            subjectCode={cls.code}
+            subjectName={cls.name}
+            type={cls.type}
+            scheduledCode={cls.scheduledCode || cls.code}
+            selectedDate={selectedDate}
+            biometricDone={biometricDone}
+            isHoliday={isHoliday}
+            isFuture={isFuture}
+            isOngoing={ongoingSlot === cls.time}
+            refreshDashboard={refreshDashboard}
+          />
+        ))}
+      </div>
+
+      {/* extra class */}
       {!isFuture && (
-          <div className="px-4">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 border-l-4 border-orange-500 pl-2">Add Extra Class</h2>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                <input 
-                    list="subjects-list" 
-                    placeholder="Search Name or Code..." 
-                    className="w-full text-lg font-bold border-b-2 border-gray-200 py-2 outline-none"
-                    onChange={(e) => {
-                        const val = e.target.value.toLowerCase();
-                        const found = ALL_SUBJECTS.find(s => s.name.toLowerCase().includes(val) || s.code.toLowerCase() === val);
-                        if(found) handleExtraClassSelect(found.code);
-                    }}
-                />
-                <datalist id="subjects-list">
-                    {ALL_SUBJECTS.map(s => <option key={s.code} value={s.name}>[{s.code}]</option>)}
-                </datalist>
-            </div>
+        <div className="mt-6 bg-white border border-gray-100 rounded-2xl p-4">
+          <h3 className="text-lg font-black">Add Extra / Swap</h3>
+
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              type="time"
+              value={extraTime}
+              onChange={(e) => setExtraTime(e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
+            />
+
+            <input
+              value={extraCode}
+              onChange={(e) => setExtraCode(e.target.value)}
+              placeholder="Subject code"
+              className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
+              list="allSubjects"
+            />
+            <datalist id="allSubjects">
+              {ALL_SUBJECTS.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
+                </option>
+              ))}
+            </datalist>
+
+            <button
+              onClick={addExtraClass}
+              disabled={!extraTime || !extraCode}
+              className="sm:col-span-3 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
+            >
+              Add (time required)
+            </button>
           </div>
+
+          <div className="mt-2 text-xs font-bold text-gray-500">
+            If the time matches a routine slot, it will save as a SWAP automatically.
+          </div>
+        </div>
       )}
     </div>
   );
-                  }
+}
