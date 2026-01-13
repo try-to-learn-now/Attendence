@@ -1,47 +1,49 @@
 // app/api/analytics/route.js
 import dbConnect from "@/lib/db";
 import Subject from "@/models/Subject";
+import { SEMESTER } from "@/lib/semester_config";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export async function GET() {
   await dbConnect();
 
-  const subjects = await Subject.find({}, { attendance_logs: 1 });
+  try {
+    const subjects = await Subject.find({}).lean();
 
-  let total = 0;
-  let present = 0;     // green
-  let pproxy = 0;      // orange (P+PROXY)
-  let proxy = 0;       // black
-  let absent = 0;      // red
-  let noClass = 0;     // grey
+    let total = 0;
+    let present = 0;
+    let pproxy = 0;
+    let proxy = 0;
+    let absent = 0;
+    let noClass = 0;
 
-  for (const s of subjects) {
-    for (const log of s.attendance_logs || []) {
-      const st = log.status;
+    const semStart = new Date(SEMESTER.startDate);
 
-      if (st === "grey") {
-        noClass++;
-        continue; // excluded from total
-      }
+    for (const s of subjects) {
+      (s.attendance_logs || []).forEach((log) => {
+        const d = new Date(log.date);
+        if (d < semStart) return; // ignore before sem
 
-      total++;
+        if (log.status === "grey") {
+          noClass++;
+          return;
+        }
 
-      if (st === "green") present++;
-      else if (st === "orange") pproxy++;
-      else if (st === "black") proxy++;
-      else if (st === "red") absent++;
+        total++;
+        if (log.status === "green") present++;
+        else if (log.status === "orange") pproxy++;
+        else if (log.status === "black") proxy++;
+        else if (log.status === "red") absent++;
+      });
     }
+
+    return NextResponse.json({
+      success: true,
+      data: { total, present, pproxy, proxy, absent, noClass },
+    });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
-
-  return NextResponse.json(
-    { total, present, pproxy, proxy, absent, noClass },
-    {
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-      },
-    }
-  );
 }
