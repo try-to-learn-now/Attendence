@@ -1,5 +1,4 @@
 // app/api/attendance/check/route.js
-
 import dbConnect from "@/lib/db";
 import Subject from "@/models/Subject";
 import { NextResponse } from "next/server";
@@ -11,7 +10,8 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const dateStr = searchParams.get("date"); // YYYY-MM-DD
+  const dateStr = searchParams.get("date");
+  const timeSlot = searchParams.get("timeSlot");
 
   if (!code) return NextResponse.json({ status: null });
 
@@ -21,21 +21,26 @@ export async function GET(request) {
       status: null,
       logs: [],
       stats: { teacher: 0, bio: 0 },
+      target_percent: 75,
     });
   }
 
+  // slot status
   let todayStatus = null;
   if (dateStr) {
-    const log = subject.attendance_logs.find(
-      (l) => new Date(l.date).toISOString().split("T")[0] === dateStr
-    );
+    const log = subject.attendance_logs.find((l) => {
+      const d = new Date(l.date).toISOString().split("T")[0];
+      const timeOk = timeSlot ? l.timeSlot === timeSlot : true;
+      return d === dateStr && timeOk;
+    });
     if (log) todayStatus = log.status;
   }
 
+  // stats
   const logs = subject.attendance_logs;
   const validClasses = logs.filter((l) => l.status !== "grey").length;
   const teacherPresent = logs.filter((l) => l.status === "green" || l.status === "black").length;
-  const bioPresent = logs.filter((l) => l.status === "green" || l.status === "orange").length;
+  const bioPresent = logs.filter((l) => l.is_bio_present).length;
 
   const teacherPercent = validClasses ? Math.round((teacherPresent / validClasses) * 100) : 0;
   const bioPercent = validClasses ? Math.round((bioPresent / validClasses) * 100) : 0;
@@ -44,5 +49,6 @@ export async function GET(request) {
     status: todayStatus,
     logs,
     stats: { teacher: teacherPercent, bio: bioPercent },
+    target_percent: subject.target_percent ?? 75,
   });
 }
