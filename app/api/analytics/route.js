@@ -1,6 +1,7 @@
-import dbConnect from '@/lib/db';
-import Subject from '@/models/Subject';
-import { NextResponse } from 'next/server';
+// app/api/analytics/route.js
+import dbConnect from "@/lib/db";
+import Subject from "@/models/Subject";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -8,23 +9,39 @@ export const revalidate = 0;
 export async function GET() {
   await dbConnect();
 
-  const subjects = await Subject.find({});
-  let total = 0, real = 0, pproxy = 0, proxy = 0, absent = 0;
+  const subjects = await Subject.find({}, { attendance_logs: 1 });
 
-  subjects.forEach(sub => {
-    sub.attendance_logs.forEach(log => {
-      if (log.status !== 'grey') {
-        total++;
-        if (log.status === 'green') real++;
-        if (log.status === 'orange') pproxy++;
-        if (log.status === 'black') proxy++;
-        if (log.status === 'red') absent++;
+  let total = 0;
+  let present = 0;     // green
+  let pproxy = 0;      // orange (P+PROXY)
+  let proxy = 0;       // black
+  let absent = 0;      // red
+  let noClass = 0;     // grey
+
+  for (const s of subjects) {
+    for (const log of s.attendance_logs || []) {
+      const st = log.status;
+
+      if (st === "grey") {
+        noClass++;
+        continue; // excluded from total
       }
-    });
-  });
+
+      total++;
+
+      if (st === "green") present++;
+      else if (st === "orange") pproxy++;
+      else if (st === "black") proxy++;
+      else if (st === "red") absent++;
+    }
+  }
 
   return NextResponse.json(
-    { total, real, pproxy, proxy, absent },
-    { headers: { "Cache-Control": "no-store, max-age=0" } }
+    { total, present, pproxy, proxy, absent, noClass },
+    {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    }
   );
 }
