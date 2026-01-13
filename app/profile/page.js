@@ -1,128 +1,177 @@
 // app/profile/page.js
 "use client";
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 export default function ProfilePage() {
-  const [stats, setStats] = useState({ total: 0, real: 0, bunk: 0, proxy: 0, absent: 0 });
-  const [loading, setLoading] = useState(false);
-  
+  const [stats, setStats] = useState({
+    total: 0,
+    present: 0,
+    pproxy: 0,
+    proxy: 0,
+    absent: 0,
+    noClass: 0,
+  });
+
   useEffect(() => {
-    fetch('/api/analytics')
-      .then(res => res.json())
-      .then(data => setStats(data));
+    async function load() {
+      const res = await fetch(`/api/analytics?ts=${Date.now()}`, { cache: "no-store" });
+      const data = await res.json();
+      setStats(data);
+    }
+    load();
   }, []);
 
-  const downloadReport = async (type) => {
-    setLoading(true);
-    
-    // 1. Fetch RAW Data (We reuse the Generate API but ask for JSON now)
-    // NOTE: You need to update api/pdf/generate to return JSON if we ask for it, 
-    // OR simply fetch all subjects here. Let's fetch subjects directly for simplicity.
-    const res = await fetch('/api/subjects');
-    const response = await res.json();
-    const subjects = response.data;
+  const presentPlusPproxyPercent =
+    stats.total > 0 ? Math.round(((stats.present + stats.pproxy) / stats.total) * 100) : 0;
 
-    // 2. Load PDF Libraries dynamically
-    const jsPDF = (await import('jspdf')).default;
-    const autoTable = (await import('jspdf-autotable')).default;
+  const presentOnlyPercent =
+    stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0;
+
+  // ---- PDF helpers (same idea as your current code, but fixed NO CLASS mapping) ----
+  async function fetchSubjects() {
+    const res = await fetch(`/api/subjects?ts=${Date.now()}`, { cache: "no-store" });
+    return res.json();
+  }
+
+  function statusToLabel(status) {
+    if (status === "green") return "PRESENT";
+    if (status === "orange") return "P+PROXY";
+    if (status === "black") return "PROXY";
+    if (status === "red") return "ABSENT";
+    return "NO CLASS";
+  }
+
+  async function downloadCompleteReport() {
+    const { subjects } = await fetchSubjects();
+
+    const jsPDF = (await import("jspdf")).default;
+    const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF();
 
-    // 3. Header
-    doc.setFontSize(18);
-    doc.text("Nitesh ERP - Global Report", 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Type: ${type} | Generated: ${new Date().toLocaleDateString()}`, 14, 28);
+    doc.setFontSize(16);
+    doc.text("Attendance Report (Complete)", 14, 18);
+    doc.setFontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
 
-    // 4. Process Data
-    let rows = [];
-    
-    subjects.forEach(sub => {
-        sub.attendance_logs.forEach(log => {
-            rows.push({
-                rawDate: new Date(log.date),
-                date: new Date(log.date).toLocaleDateString(),
-                subject: sub.name,
-                status: log.status.toUpperCase(),
-                type: log.status === 'green' ? 'REAL' : (log.status === 'orange' ? 'BUNK' : (log.status === 'black' ? 'PROXY' : 'ABSENT'))
-            });
-        });
-    });
+    const rows = [];
 
-    // Sort Newest First
-    rows.sort((a, b) => b.rawDate - a.rawDate);
-
-    // Apply Filters
-    if (type === 'REAL_BUNK') {
-        rows = rows.filter(r => r.status === 'GREEN' || r.status === 'ORANGE');
+    for (const subject of subjects || []) {
+      const logs = subject.attendance_logs || [];
+      for (const log of logs) {
+        const d = new Date(log.date).toLocaleDateString();
+        rows.push([
+          subject.name,
+          subject.code,
+          d,
+          log.timeSlot || "-",
+          statusToLabel(log.status),
+          log.topic || "-",
+        ]);
+      }
     }
 
-    // Hide Duplicate Dates
-    let lastDate = "";
-    const finalRows = rows.map(r => {
-        const showDate = r.date !== lastDate;
-        lastDate = r.date;
-        return [showDate ? r.date : "", r.subject, r.status, r.type];
-    });
-
-    // 5. Generate Table
     autoTable(doc, {
-        startY: 35,
-        head: [['Date', 'Subject', 'Status', 'Type']],
-        body: finalRows,
-        theme: 'grid',
-        didParseCell: (data) => {
-            if (data.column.index === 2) { // Color Status
-                const t = data.cell.raw;
-                if (t === 'GREEN') data.cell.styles.textColor = [0, 150, 0];
-                if (t === 'ORANGE') data.cell.styles.textColor = [255, 165, 0];
-                if (t === 'RED') data.cell.styles.textColor = [200, 0, 0];
-            }
-        }
+      startY: 32,
+      head: [["Subject", "Code", "Date", "Time", "Status", "Topic"]],
+      body: rows,
+      theme: "grid",
     });
 
-    // 6. Save
-    doc.save(`Attendance_Report_${type}.pdf`);
-    setLoading(false);
-  };
+    doc.save("Attendance_Report_ALL.pdf");
+  }
+
+  async function downloadPresentPlusPproxyOnly() {
+    const { subjects } = await fetchSubjects();
+
+    const jsPDF = (await import("jspdf")).default;
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("Attendance Report (Present + P+Proxy Only)", 14, 18);
+    doc.setFontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 26);
+
+    const rows = [];
+
+    for (const subject of subjects || []) {
+      const logs = (subject.attendance_logs || []).filter(
+        (l) => l.status === "green" || l.status === "orange"
+      );
+
+      for (const log of logs) {
+        const d = new Date(log.date).toLocaleDateString();
+        rows.push([
+          subject.name,
+          subject.code,
+          d,
+          log.timeSlot || "-",
+          statusToLabel(log.status),
+          log.topic || "-",
+        ]);
+      }
+    }
+
+    autoTable(doc, {
+      startY: 32,
+      head: [["Subject", "Code", "Date", "Time", "Status", "Topic"]],
+      body: rows,
+      theme: "grid",
+    });
+
+    doc.save("Attendance_Report_PRESENT_PPROXY.pdf");
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <Link href="/" className="text-sm font-bold text-gray-400 mb-6 block">← BACK TO DASHBOARD</Link>
-      
-      <h1 className="text-3xl font-black mb-8">Analytics 📊</h1>
+    <div className="max-w-3xl mx-auto p-6">
+      <Link href="/" className="text-sm font-black text-gray-400">
+        ← BACK TO DASHBOARD
+      </Link>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100">
-           <p className="text-xs font-bold text-gray-400 uppercase">Real + Bunk</p>
-           <p className="text-3xl font-black text-blue-600">
-             {stats.total > 0 ? Math.round(((stats.real + stats.bunk) / stats.total) * 100) : 0}%
-           </p>
-           <p className="text-xs text-gray-400 mt-1">Biometric</p>
+      <h1 className="mt-6 text-5xl font-black">Analytics 📊</h1>
+
+      <div className="mt-8 grid grid-cols-2 gap-4">
+        <div className="bg-white rounded-2xl border border-gray-100 p-6">
+          <div className="text-xs font-black text-gray-400">PRESENT + P+PROXY</div>
+          <div className="mt-2 text-5xl font-black text-blue-600">
+            {presentPlusPproxyPercent}%
+          </div>
+          <div className="mt-2 text-sm font-bold text-gray-400">
+            Total classes counted: {stats.total}
+          </div>
         </div>
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-green-100">
-           <p className="text-xs font-bold text-gray-400 uppercase">Real Only</p>
-           <p className="text-3xl font-black text-green-600">
-             {stats.total > 0 ? Math.round((stats.real / stats.total) * 100) : 0}%
-           </p>
-           <p className="text-xs text-gray-400 mt-1">Classroom</p>
+
+        <div className="bg-white rounded-2xl border border-gray-100 p-6">
+          <div className="text-xs font-black text-gray-400">PRESENT ONLY</div>
+          <div className="mt-2 text-5xl font-black text-green-600">
+            {presentOnlyPercent}%
+          </div>
+          <div className="mt-2 text-sm font-bold text-gray-400">
+            NO CLASS (ignored): {stats.noClass}
+          </div>
         </div>
       </div>
 
-      {/* Download Buttons */}
-      <h2 className="text-lg font-bold mb-4 text-gray-800">Download Reports</h2>
-      <div className="space-y-3">
-        <button onClick={() => downloadReport('ALL')} disabled={loading} className="w-full bg-black text-white p-4 rounded-xl font-bold flex justify-between items-center active:scale-95 transition">
-           <span>{loading ? "Generating..." : "Complete Report"}</span>
-           <span>📄</span>
+      <h2 className="mt-10 text-3xl font-black">Download Reports</h2>
+
+      <div className="mt-4 space-y-3">
+        <button
+          onClick={downloadCompleteReport}
+          className="w-full bg-black text-white py-4 rounded-2xl font-black flex items-center justify-between px-6"
+        >
+          Complete Report <span>📄</span>
         </button>
-        
-        <button onClick={() => downloadReport('REAL_BUNK')} disabled={loading} className="w-full bg-white border border-gray-200 text-gray-800 p-4 rounded-xl font-bold flex justify-between items-center active:scale-95 transition">
-           <span>Real + Bunk Only</span>
-           <span className="text-orange-500">📄</span>
+
+        <button
+          onClick={downloadPresentPlusPproxyOnly}
+          className="w-full bg-white border border-gray-200 text-gray-900 py-4 rounded-2xl font-black flex items-center justify-between px-6"
+        >
+          Present + P+Proxy Only <span>📄</span>
         </button>
       </div>
     </div>
   );
 }
+
