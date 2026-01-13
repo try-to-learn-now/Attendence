@@ -1,12 +1,34 @@
 // models/DailyLog.js
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const DailyLogSchema = new mongoose.Schema({
-  dateString: { type: String, required: true, unique: true }, // "YYYY-MM-DD"
-  biometric_done: { type: Boolean, default: false },
-  is_holiday: { type: Boolean, default: false }, // Manual Holiday Memory
-  note: { type: String, default: '' }
-});
+const SwapSchema = new mongoose.Schema(
+  {
+    timeSlot: { type: String, required: true },
+    fromCode: { type: String, required: true }, // scheduled
+    toCode: { type: String, required: true }, // actual
+  },
+  { _id: false }
+);
 
-// Fix: Prevent "OverwriteModelError" during hot reloads
-export default mongoose.models.DailyLog || mongoose.model('DailyLog', DailyLogSchema);
+const ExtraSchema = new mongoose.Schema(
+  {
+    timeSlot: { type: String, required: true },
+    code: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const DailyLogSchema = new mongoose.Schema(
+  {
+    dateString: { type: String, required: true, unique: true }, // YYYY-MM-DD
+    biometric_done: { type: Boolean, default: false },
+    is_holiday: { type: Boolean, default: false },
+    note: { type: String, default: "" },
+
+    swaps: { type: [SwapSchema], default: [] },
+    extras: { type: [ExtraSchema], default: [] },
+  },
+  { timestamps: true }
+);
+
+export default mongoose.models.DailyLog || mongoose.model("DailyLog", DailyLogSchema);
