@@ -24,12 +24,18 @@ export async function POST(req) {
   }
 }
 
-// NEW: This lets you EDIT the Hardcore Routine
+// UPDATED PUT — now supports target_percent
 export async function PUT(req) {
   await dbConnect();
   try {
-    const { _id, name, code, schedule } = await req.json();
-    await Subject.findByIdAndUpdate(_id, { name, code, schedule });
+    const { _id, name, code, schedule, target_percent } = await req.json();
+
+    await Subject.findByIdAndUpdate(
+      _id,
+      { name, code, schedule, target_percent },
+      { new: true } // returns updated doc if needed later
+    );
+
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message });
