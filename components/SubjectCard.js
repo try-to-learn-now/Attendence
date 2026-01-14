@@ -1,30 +1,23 @@
-// ===== File: components/SubjectCard.js =====
+// components/SubjectCard.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ALL_SUBJECTS, getSubjectByCode } from "@/lib/universal_data";
 
-function label(status) {
+function statusLabel(status) {
   if (status === "green") return "PRESENT";
-  if (status === "orange") return "P+PROXY";
+  if (status === "orange") return "P + PROXY";
   if (status === "black") return "PROXY";
   if (status === "red") return "ABSENT";
   return "NO CLASS";
 }
 
-function badge(status) {
-  if (status === "green") return "bg-green-600 text-white";
-  if (status === "orange") return "bg-orange-500 text-white";
-  if (status === "black") return "bg-gray-900 text-white";
-  if (status === "red") return "bg-red-600 text-white";
-  return "bg-gray-200 text-gray-700";
-}
-
-function fmtDate(d) {
-  try {
-    return new Date(d).toLocaleDateString();
-  } catch {
-    return "-";
-  }
+function statusColor(status) {
+  if (status === "green") return "bg-green-600";
+  if (status === "orange") return "bg-orange-500";
+  if (status === "black") return "bg-gray-800";
+  if (status === "red") return "bg-red-500";
+  return "bg-gray-400";
 }
 
 export default function SubjectCard({
@@ -32,8 +25,8 @@ export default function SubjectCard({
   classTime,
   subjectCode,
   subjectName,
-  type,
-  scheduledCode,
+  type, // "ROUTINE" | "SWAP" | "EXTRA"
+  scheduledCode, // original routine code (if SWAP)
   selectedDate,
   biometricDone,
   isHoliday,
@@ -41,288 +34,334 @@ export default function SubjectCard({
   isOngoing,
   refreshDashboard,
 }) {
+  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const [currentStatus, setCurrentStatus] = useState(null);
-  const [topic, setTopic] = useState("");
+  const [teacherPercent, setTeacherPercent] = useState(0);
+  const [bioPercent, setBioPercent] = useState(0);
+  const [totalClasses, setTotalClasses] = useState(0);
+  const [targetPercent, setTargetPercent] = useState(75);
 
-  const [lastLogs, setLastLogs] = useState([]);
-  const [stats, setStats] = useState({ teacher: 0, bio: 0, total: 0 });
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [swapToCode, setSwapToCode] = useState("");
 
-  const [target, setTarget] = useState(75);
+  const canEdit = !isFuture;
 
-  // Biometric override UX
-  const [warnCount, setWarnCount] = useState(0);
-  const [overrideReason, setOverrideReason] = useState("online_class");
+  const listId = useMemo(() => {
+    return `swapSubjects-${String(classTime).replace(/[^a-zA-Z0-9]/g, "")}-${period}`;
+  }, [classTime, period]);
 
-  const needsBio = useMemo(
-    () => currentStatus === "green" || currentStatus === "orange",
-    [currentStatus]
-  );
-
-  const riskLow = useMemo(() => {
-    // Only show risk when there is real data
-    return stats.total > 0 && stats.teacher < target;
-  }, [stats, target]);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/attendance/check?code=${encodeURIComponent(
-          subjectCode
-        )}&date=${encodeURIComponent(selectedDate)}&timeSlot=${encodeURIComponent(
-          classTime
-        )}`,
-        { cache: "no-store" }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok || !data?.success) {
-        setCurrentStatus(null);
-        setLastLogs([]);
-        setStats({ teacher: 0, bio: 0, total: 0 });
-        setTarget(75);
-        setTopic("");
-        setLoading(false);
-        return;
-      }
-
-      setCurrentStatus(data?.current?.status ?? data?.status ?? null);
-      setTopic(data?.current?.topic ?? "");
-      setLastLogs(data?.logs || []);
-      setStats(data?.stats || { teacher: 0, bio: 0, total: 0 });
-      setTarget(data?.target_percent ?? 75);
-    } catch {
-      setCurrentStatus(null);
-      setLastLogs([]);
-      setStats({ teacher: 0, bio: 0, total: 0 });
-      setTarget(75);
-      setTopic("");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const scheduledName = useMemo(() => {
+    const s = scheduledCode ? getSubjectByCode(scheduledCode) : null;
+    return s?.name || "";
+  }, [scheduledCode]);
 
   useEffect(() => {
-    load();
+    async function fetchStatus() {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/attendance/check?code=${subjectCode}&date=${selectedDate}&timeSlot=${classTime}`
+        );
+        const data = await res.json();
+
+        if (data.success) {
+          setStatus(data.status);
+
+          setTeacherPercent(data.stats.teacher);
+          setBioPercent(data.stats.bio);
+          setTotalClasses(data.stats.total);
+          setTargetPercent(data.target_percent);
+        }
+      } catch (err) {
+        // ignore
+      }
+      setLoading(false);
+    }
+
+    fetchStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectCode, selectedDate, classTime]);
 
-  async function mark(status) {
-    if (isFuture) return;
-    if (isHoliday && status !== "grey") {
-      window.alert("Holiday lock: only NO CLASS allowed.");
-      return;
+  const teacherNeeds = useMemo(() => {
+    if (totalClasses === 0) return { label: "No data", color: "text-gray-400" };
+
+    const target = targetPercent || 75;
+    const current = teacherPercent;
+
+    if (current >= target) {
+      return { label: `Safe (${current}%)`, color: "text-green-600" };
     }
 
-    const requiresBio = status === "green" || status === "orange";
+    return { label: `Risky (${current}% < ${target}%)`, color: "text-red-600" };
+  }, [teacherPercent, totalClasses, targetPercent]);
 
-    // 2-step warning before override save
-    let bioOverride = false;
-    let reason = "";
+  async function markAttendance(newStatus) {
+    if (isHoliday || isFuture) return;
 
-    if (requiresBio && !biometricDone) {
-      if (warnCount < 1) {
-        setWarnCount(1);
-        window.alert(
-          "Biometric not done.\nTap the SAME button again to save as ONLINE (override)."
-        );
-        return;
-      }
-      bioOverride = true;
-      reason = overrideReason || "online_class";
-    } else {
-      setWarnCount(0);
-    }
+    setStatus(newStatus);
 
-    const res = await fetch("/api/attendance", {
+    await fetch("/api/attendance", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         code: subjectCode,
         name: subjectName,
-        status,
-        topic: topic || "",
+        status: newStatus,
+        topic: "",
         date: selectedDate,
         timeSlot: classTime,
-        scheduledCode: scheduledCode || subjectCode,
-
-        // biometric override
-        bioOverride,
-        overrideReason: reason,
+        scheduledCode: scheduledCode || "",
       }),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      window.alert(err?.error || "Save failed");
+    refreshDashboard?.();
+  }
+
+  async function applySwap() {
+    if (!canEdit) return;
+    const toCode = (swapToCode || "").trim().toUpperCase();
+    if (!toCode) return;
+
+    const fromCode = (scheduledCode || subjectCode || "").trim().toUpperCase();
+    if (!fromCode) return;
+
+    if (toCode === fromCode) {
+      await removeSwap();
+      setSwapToCode("");
+      setSwapOpen(false);
       return;
     }
 
-    await load();
-    await refreshDashboard?.();
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        swap: { timeSlot: classTime, fromCode, toCode },
+      }),
+    });
+
+    setSwapOpen(false);
+    setSwapToCode("");
+    refreshDashboard?.();
   }
+
+  async function removeSwap() {
+    if (!canEdit) return;
+
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        removeSwap: { timeSlot: classTime },
+      }),
+    });
+
+    setSwapOpen(false);
+    setSwapToCode("");
+    refreshDashboard?.();
+  }
+
+  async function removeExtra() {
+    if (!canEdit) return;
+
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        removeExtra: { timeSlot: classTime, code: subjectCode },
+      }),
+    });
+
+    refreshDashboard?.();
+  }
+
+  const typeLabel =
+    type === "ROUTINE" ? "ROUTINE" : type === "SWAP" ? "SWAP" : "EXTRA";
 
   return (
     <div
-      className={`bg-white border border-gray-100 rounded-2xl p-4 ${
-        isOngoing ? "ring-2 ring-blue-500" : ""
+      className={`bg-white rounded-2xl border border-gray-100 p-4 shadow-sm ${
+        isOngoing ? "ring-2 ring-black" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-black text-gray-400">
-            PERIOD {period} • {classTime}
-            {type && type !== "ROUTINE" ? (
-              <span className="ml-2 px-2 py-0.5 rounded-lg bg-gray-100 text-gray-700">
-                {type}
-              </span>
-            ) : null}
-            {isOngoing ? (
-              <span className="ml-2 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700">
-                ONGOING
-              </span>
-            ) : null}
+            Period {period} • {typeLabel}
           </div>
 
-          <div className="mt-1 text-lg font-black truncate">
-            {subjectName}
+          <div className="mt-1 text-lg font-black truncate">{subjectName}</div>
+
+          <div className="text-xs font-bold text-gray-500">
+            Code: {subjectCode} • Time: {classTime}
           </div>
-          <div className="text-xs font-bold text-gray-500">{subjectCode}</div>
+
+          {type === "SWAP" ? (
+            <div className="mt-1 text-xs font-bold text-gray-500">
+              Swap: {scheduledCode} → {subjectCode}
+              {scheduledName ? ` • ${scheduledName}` : ""}
+            </div>
+          ) : type === "ROUTINE" ? (
+            <div className="mt-1 text-xs font-bold text-gray-500">
+              Scheduled: {scheduledCode}
+            </div>
+          ) : null}
+
+          {!isFuture && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(type === "ROUTINE" || type === "SWAP") && (
+                <button
+                  onClick={() => setSwapOpen((p) => !p)}
+                  className="px-3 py-1 rounded-xl border border-gray-200 text-xs font-black"
+                >
+                  {swapOpen ? "Close" : type === "SWAP" ? "Change Swap" : "Swap"}
+                </button>
+              )}
+
+              {type === "SWAP" && (
+                <button
+                  onClick={removeSwap}
+                  className="px-3 py-1 rounded-xl border border-gray-200 text-xs font-black"
+                >
+                  Remove Swap
+                </button>
+              )}
+
+              {type === "EXTRA" && (
+                <button
+                  onClick={removeExtra}
+                  className="px-3 py-1 rounded-xl border border-gray-200 text-xs font-black"
+                >
+                  Remove Extra
+                </button>
+              )}
+            </div>
+          )}
+
+          {swapOpen && (type === "ROUTINE" || type === "SWAP") && (
+            <div className="mt-3 bg-gray-50 border border-gray-100 rounded-2xl p-3">
+              <div className="text-xs font-black text-gray-500">Swap to</div>
+
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={swapToCode}
+                  onChange={(e) => setSwapToCode(e.target.value)}
+                  placeholder="Subject code"
+                  className="flex-1 border border-gray-200 rounded-xl px-3 py-2 font-black"
+                  list={listId}
+                />
+                <datalist id={listId}>
+                  {ALL_SUBJECTS.map((s) => (
+                    <option key={`${classTime}-${s.code}`} value={s.code}>
+                      {s.name}
+                    </option>
+                  ))}
+                </datalist>
+
+                <button
+                  onClick={applySwap}
+                  disabled={!swapToCode}
+                  className="px-4 py-2 rounded-xl bg-black text-white font-black disabled:opacity-40"
+                >
+                  Apply
+                </button>
+              </div>
+
+              <div className="mt-2 text-[11px] font-bold text-gray-500">
+                Choosing the scheduled code will remove the swap.
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="text-right">
-          <div className="text-xs font-black text-gray-400">TEACHER</div>
-          <div className="text-2xl font-black">{stats.teacher}%</div>
+        <div className="text-right shrink-0">
+          {loading ? (
+            <div className="text-xs font-bold text-gray-400">Loading...</div>
+          ) : (
+            <div
+              className={`px-3 py-1 rounded-xl text-xs font-black text-white ${statusColor(
+                status
+              )}`}
+            >
+              {statusLabel(status)}
+            </div>
+          )}
 
-          <div className="mt-1 text-xs font-black text-gray-400">BIO</div>
-          <div className="text-lg font-black">{stats.bio}%</div>
+          <div className="mt-2 text-[11px] font-black text-gray-400">
+            Teacher:{" "}
+            <span className={teacherNeeds.color}>{teacherNeeds.label}</span>
+          </div>
+          <div className="text-[11px] font-black text-gray-400">
+            Bio: {bioPercent}%
+          </div>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <div className="text-xs font-black text-gray-500">
-          Target: {target}%
-        </div>
-        {riskLow ? (
-          <div className="px-2 py-0.5 rounded-lg bg-red-50 text-red-700 text-xs font-black">
-            Below target
-          </div>
-        ) : null}
-        {stats.total > 0 ? (
-          <div className="px-2 py-0.5 rounded-lg bg-gray-50 text-gray-700 text-xs font-black">
-            Total: {stats.total}
-          </div>
-        ) : null}
-      </div>
-
-      {(!biometricDone) ? (
-        <div className="mt-2 text-xs font-bold text-gray-500">
-          Bio is OFF — saving Present/P+Proxy needs override (2nd tap).
-          <select
-            value={overrideReason}
-            onChange={(e) => setOverrideReason(e.target.value)}
-            className="ml-2 border border-gray-200 rounded-lg px-2 py-1"
-          >
-            <option value="online_class">online_class</option>
-            <option value="biometric_machine_off">biometric_machine_off</option>
-            <option value="teacher_said_skip">teacher_said_skip</option>
-          </select>
-        </div>
-      ) : null}
-
-      <div className="mt-3 grid grid-cols-5 gap-2">
+      <div className="mt-4 grid grid-cols-5 gap-2">
         <button
-          onClick={() => mark("green")}
-          disabled={loading || (isHoliday && !isFuture)}
-          className={`py-2 rounded-xl font-black ${
-            currentStatus === "green" ? "bg-green-600 text-white" : "bg-green-50 text-green-800"
-          }`}
+          onClick={() => markAttendance("green")}
+          disabled={isHoliday || isFuture}
+          className={`py-2 rounded-xl text-xs font-black text-white ${
+            status === "green" ? "bg-green-700" : "bg-green-600"
+          } disabled:opacity-40`}
         >
           P
         </button>
 
         <button
-          onClick={() => mark("orange")}
-          disabled={loading || (isHoliday && !isFuture)}
-          className={`py-2 rounded-xl font-black ${
-            currentStatus === "orange" ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-800"
-          }`}
+          onClick={() => markAttendance("orange")}
+          disabled={isHoliday || isFuture}
+          className={`py-2 rounded-xl text-xs font-black text-white ${
+            status === "orange" ? "bg-orange-600" : "bg-orange-500"
+          } disabled:opacity-40`}
         >
           P+Pr
         </button>
 
         <button
-          onClick={() => mark("black")}
-          disabled={loading || (isHoliday && !isFuture)}
-          className={`py-2 rounded-xl font-black ${
-            currentStatus === "black" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-800"
-          }`}
+          onClick={() => markAttendance("black")}
+          disabled={isHoliday || isFuture}
+          className={`py-2 rounded-xl text-xs font-black text-white ${
+            status === "black" ? "bg-gray-900" : "bg-gray-800"
+          } disabled:opacity-40`}
         >
           Pr
         </button>
 
         <button
-          onClick={() => mark("red")}
-          disabled={loading || (isHoliday && !isFuture)}
-          className={`py-2 rounded-xl font-black ${
-            currentStatus === "red" ? "bg-red-600 text-white" : "bg-red-50 text-red-800"
-          }`}
+          onClick={() => markAttendance("red")}
+          disabled={isHoliday || isFuture}
+          className={`py-2 rounded-xl text-xs font-black text-white ${
+            status === "red" ? "bg-red-600" : "bg-red-500"
+          } disabled:opacity-40`}
         >
           A
         </button>
 
         <button
-          onClick={() => mark("grey")}
-          disabled={loading}
-          className={`py-2 rounded-xl font-black ${
-            currentStatus === "grey" ? "bg-gray-300 text-gray-900" : "bg-gray-50 text-gray-700"
-          }`}
+          onClick={() => markAttendance("grey")}
+          disabled={isHoliday || isFuture}
+          className={`py-2 rounded-xl text-xs font-black text-white ${
+            status === "grey" ? "bg-gray-600" : "bg-gray-400"
+          } disabled:opacity-40`}
         >
           NC
         </button>
       </div>
 
-      <div className="mt-3">
-        <input
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          placeholder="Topic (optional)"
-          className="w-full border border-gray-200 rounded-xl px-3 py-2 font-bold"
-        />
-      </div>
-
-      <div className="mt-4">
-        <div className="text-xs font-black text-gray-400">Last logs (semester)</div>
-
-        <div className="mt-2 space-y-2">
-          {lastLogs.length === 0 ? (
-            <div className="text-xs font-bold text-gray-400">No logs yet</div>
-          ) : (
-            lastLogs.map((l, idx) => (
-              <div
-                key={`${idx}-${l.date}-${l.timeSlot}`}
-                className="flex items-center justify-between gap-2"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-black text-gray-700 truncate">
-                    {fmtDate(l.date)} • {l.timeSlot || "-"}
-                  </div>
-                  <div className="text-[11px] font-bold text-gray-500 truncate">
-                    {l.topic || "-"}
-                  </div>
-                </div>
-
-                <div className={`px-2 py-1 rounded-lg text-[11px] font-black ${badge(l.status)}`}>
-                  {label(l.status)}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      {!isFuture &&
+        !isHoliday &&
+        (status === "green" || status === "orange") &&
+        !biometricDone && (
+          <div className="mt-3 text-xs font-black text-red-600 bg-red-50 border border-red-100 rounded-xl p-2">
+            Bio not marked. Saving P / P+Proxy may be blocked unless override is enabled.
+          </div>
+        )}
     </div>
   );
 }
+
