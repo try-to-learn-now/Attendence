@@ -3,7 +3,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { WEEKLY_ROUTINE, ALL_SUBJECTS, getSubjectByCode, HOLIDAYS } from "@/lib/universal_data";
+import {
+  WEEKLY_ROUTINE,
+  ALL_SUBJECTS,
+  getSubjectByCode,
+  HOLIDAYS,
+} from "@/lib/universal_data";
 import SubjectCard from "@/components/SubjectCard";
 
 function todayISO() {
@@ -53,18 +58,38 @@ export default function Home() {
   const [dailySwaps, setDailySwaps] = useState([]);
   const [dailyExtras, setDailyExtras] = useState([]);
 
-  // Extra class UI
+  // Manage UI
+  const [manageMode, setManageMode] = useState("SWAP"); // "SWAP" | "EXTRA"
+  const [swapTime, setSwapTime] = useState("");
+  const [swapToCode, setSwapToCode] = useState("");
+
   const [extraTime, setExtraTime] = useState(""); // input type=time
   const [extraCode, setExtraCode] = useState("");
 
+  const [uiMsg, setUiMsg] = useState("");
+
   const isHoliday = isHardHoliday || isManualHoliday;
+
+  const nonExtraSlots = useMemo(() => {
+    const list = [...todayClasses].filter((c) => c.type !== "EXTRA");
+    list.sort((a, b) => time12ToMinutes(a.time) - time12ToMinutes(b.time));
+    return list;
+  }, [todayClasses]);
 
   async function refreshDashboard() {
     setLoading(true);
 
     const dateObj = new Date(selectedDate);
     const dayIndex = dateObj.getDay();
-    const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+    const days = [
+      "SUNDAY",
+      "MONDAY",
+      "TUESDAY",
+      "WEDNESDAY",
+      "THURSDAY",
+      "FRIDAY",
+      "SATURDAY",
+    ];
     setDayName(days[dayIndex]);
 
     // future check
@@ -115,7 +140,13 @@ export default function Home() {
     // extras from daily log
     const extras = (bioData?.extras || []).map((e) => {
       const sub = getSubjectByCode(e.code);
-      return { time: e.timeSlot, type: "EXTRA", code: e.code, name: sub.name, scheduledCode: "" };
+      return {
+        time: e.timeSlot,
+        type: "EXTRA",
+        code: e.code,
+        name: sub.name,
+        scheduledCode: "",
+      };
     });
 
     // merge + sort (AM/PM correct)
@@ -127,9 +158,22 @@ export default function Home() {
 
     setTodayClasses(finalList);
     setLoading(false);
+
+    // default swap time for the day (keep previous if it still exists)
+    setSwapTime((prev) => {
+      if (routine.length === 0) return "";
+      const ok = routine.some((r) => r.time === prev);
+      return ok ? prev : routine[0].time;
+    });
   }
 
   useEffect(() => {
+    // reset quick inputs when switching dates
+    setUiMsg("");
+    setSwapToCode("");
+    setExtraTime("");
+    setExtraCode("");
+
     refreshDashboard();
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -158,36 +202,95 @@ export default function Home() {
     });
   }
 
-  async function addExtraClass() {
+  async function applySwap() {
     if (isFuture) return;
+    setUiMsg("");
+
+    const timeSlot = swapTime;
+    if (!timeSlot || !swapToCode) return;
+
+    const slot = nonExtraSlots.find((c) => c.time === timeSlot);
+    const fromCode = slot?.scheduledCode || slot?.code;
+    if (!fromCode) return;
+
+    // if swapping back to scheduled code, just remove swap
+    if (swapToCode === fromCode) {
+      await removeSwap(timeSlot);
+      setSwapToCode("");
+      return;
+    }
+
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        swap: { timeSlot, fromCode, toCode: swapToCode },
+      }),
+    });
+
+    setUiMsg(`Swap saved: ${fromCode} → ${swapToCode} @ ${timeSlot}`);
+    setSwapToCode("");
+    refreshDashboard();
+  }
+
+  async function removeSwap(timeSlot) {
+    if (isFuture) return;
+    setUiMsg("");
+
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dateString: selectedDate, removeSwap: { timeSlot } }),
+    });
+
+    setUiMsg(`Swap removed @ ${timeSlot}`);
+    refreshDashboard();
+  }
+
+  async function addExtra() {
+    if (isFuture) return;
+    setUiMsg("");
 
     const timeSlot = timeInputTo12h(extraTime);
     if (!timeSlot || !extraCode) return;
 
-    // conflict with existing routine time => suggest swap
-    const hasRoutineAtTime = todayClasses.some((c) => c.time === timeSlot && c.type !== "EXTRA");
+    // In EXTRA mode, we don't auto-swap. If time conflicts, tell user to use SWAP mode.
+    const hasRoutineAtTime = nonExtraSlots.some((c) => c.time === timeSlot);
     if (hasRoutineAtTime) {
-      // default behavior: swap
-      const routineAt = todayClasses.find((c) => c.time === timeSlot && c.type !== "EXTRA");
-      await fetch("/api/daily-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dateString: selectedDate,
-          swap: { timeSlot, fromCode: routineAt.scheduledCode, toCode: extraCode },
-        }),
-      });
-    } else {
-      // real extra
-      await fetch("/api/daily-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dateString: selectedDate, extra: { timeSlot, code: extraCode } }),
-      });
+      setUiMsg("This time already has a routine class. Use SWAP mode instead.");
+      return;
     }
 
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        extra: { timeSlot, code: extraCode },
+      }),
+    });
+
+    setUiMsg(`Extra added: ${extraCode} @ ${timeSlot}`);
     setExtraTime("");
     setExtraCode("");
+    refreshDashboard();
+  }
+
+  async function removeExtra(timeSlot, code) {
+    if (isFuture) return;
+    setUiMsg("");
+
+    await fetch("/api/daily-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateString: selectedDate,
+        removeExtra: { timeSlot, code },
+      }),
+    });
+
+    setUiMsg(`Extra removed: ${code} @ ${timeSlot}`);
     refreshDashboard();
   }
 
@@ -201,10 +304,15 @@ export default function Home() {
   const ongoingSlot = useMemo(() => {
     if (ongoingTime == null || todayClasses.length === 0) return null;
 
-    const sorted = [...todayClasses].sort((a, b) => time12ToMinutes(a.time) - time12ToMinutes(b.time));
+    const sorted = [...todayClasses].sort(
+      (a, b) => time12ToMinutes(a.time) - time12ToMinutes(b.time)
+    );
     for (let i = 0; i < sorted.length; i++) {
       const start = time12ToMinutes(sorted[i].time);
-      const end = i < sorted.length - 1 ? time12ToMinutes(sorted[i + 1].time) : start + 60;
+      const end =
+        i < sorted.length - 1
+          ? time12ToMinutes(sorted[i + 1].time)
+          : start + 60;
       if (ongoingTime >= start && ongoingTime < end) return sorted[i].time;
     }
     return null;
@@ -229,7 +337,10 @@ export default function Home() {
     }
   }
 
-  const timeString = currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeString = currentTime.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <div className="max-w-5xl mx-auto p-4">
@@ -250,10 +361,15 @@ export default function Home() {
               Today
             </button>
           </div>
-          <div className="mt-1 text-xs font-bold text-gray-500">{dayName} • {timeString}</div>
+          <div className="mt-1 text-xs font-bold text-gray-500">
+            {dayName} • {timeString}
+          </div>
         </div>
 
-        <Link href="/profile" className="bg-white border border-gray-100 rounded-2xl p-3 font-black">
+        <Link
+          href="/profile"
+          className="bg-white border border-gray-100 rounded-2xl p-3 font-black"
+        >
           👤
         </Link>
       </div>
@@ -293,7 +409,9 @@ export default function Home() {
           <button
             onClick={toggleManualHoliday}
             className={`flex-1 py-3 rounded-2xl font-black border ${
-              isManualHoliday ? "bg-black text-white border-black" : "bg-white text-gray-700 border-gray-200"
+              isManualHoliday
+                ? "bg-black text-white border-black"
+                : "bg-white text-gray-700 border-gray-200"
             }`}
           >
             {isManualHoliday ? "Holiday ON" : "Mark Holiday"}
@@ -324,45 +442,220 @@ export default function Home() {
         ))}
       </div>
 
-      {/* extra class */}
+      {/* manage swaps/extras */}
       {!isFuture && (
         <div className="mt-6 bg-white border border-gray-100 rounded-2xl p-4">
-          <h3 className="text-lg font-black">Add Extra / Swap</h3>
+          <h3 className="text-lg font-black">Manage Swaps / Extras</h3>
 
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <input
-              type="time"
-              value={extraTime}
-              onChange={(e) => setExtraTime(e.target.value)}
-              className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
-            />
+          {uiMsg && (
+            <div className="mt-2 text-xs font-black text-gray-700 bg-gray-50 border border-gray-100 rounded-xl p-2">
+              {uiMsg}
+            </div>
+          )}
 
-            <input
-              value={extraCode}
-              onChange={(e) => setExtraCode(e.target.value)}
-              placeholder="Subject code"
-              className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
-              list="allSubjects"
-            />
-            <datalist id="allSubjects">
-              {ALL_SUBJECTS.map((s) => (
-                <option key={s.code} value={s.code}>
-                  {s.name}
-                </option>
-              ))}
-            </datalist>
-
+          <div className="mt-3 flex gap-2">
             <button
-              onClick={addExtraClass}
-              disabled={!extraTime || !extraCode}
-              className="sm:col-span-3 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
+              onClick={() => setManageMode("SWAP")}
+              className={`flex-1 py-2 rounded-2xl font-black border ${
+                manageMode === "SWAP"
+                  ? "bg-black text-white border-black"
+                  : "bg-white text-gray-700 border-gray-200"
+              }`}
             >
-              Add (time required)
+              Swap
+            </button>
+            <button
+              onClick={() => setManageMode("EXTRA")}
+              className={`flex-1 py-2 rounded-2xl font-black border ${
+                manageMode === "EXTRA"
+                  ? "bg-black text-white border-black"
+                  : "bg-white text-gray-700 border-gray-200"
+              }`}
+            >
+              Extra
             </button>
           </div>
 
-          <div className="mt-2 text-xs font-bold text-gray-500">
-            If the time matches a routine slot, it will save as a SWAP automatically.
+          {manageMode === "SWAP" ? (
+            <div className="mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={swapTime}
+                  onChange={(e) => setSwapTime(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 font-black"
+                >
+                  {nonExtraSlots.map((c) => (
+                    <option
+                      key={`${c.time}-${c.scheduledCode || c.code}`}
+                      value={c.time}
+                    >
+                      {c.time} • {c.scheduledCode || c.code}
+                      {c.type === "SWAP" ? ` → ${c.code}` : ""}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  value={swapToCode}
+                  onChange={(e) => setSwapToCode(e.target.value)}
+                  placeholder="Swap to code"
+                  className="border border-gray-200 rounded-xl px-3 py-2 font-black"
+                  list="allSubjectsSwap"
+                />
+                <datalist id="allSubjectsSwap">
+                  {ALL_SUBJECTS.map((s) => (
+                    <option key={`swap-${s.code}`} value={s.code}>
+                      {s.name}
+                    </option>
+                  ))}
+                </datalist>
+
+                <button
+                  onClick={applySwap}
+                  disabled={!swapTime || !swapToCode}
+                  className="sm:col-span-3 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
+                >
+                  Apply Swap
+                </button>
+              </div>
+
+              <div className="mt-2 text-xs font-bold text-gray-500">
+                Tip: pick a routine time, then choose the subject code to replace it.
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  type="time"
+                  value={extraTime}
+                  onChange={(e) => setExtraTime(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
+                />
+
+                <input
+                  value={extraCode}
+                  onChange={(e) => setExtraCode(e.target.value)}
+                  placeholder="Extra subject code"
+                  className="border border-gray-200 rounded-xl px-3 py-2 font-bold"
+                  list="allSubjectsExtra"
+                />
+                <datalist id="allSubjectsExtra">
+                  {ALL_SUBJECTS.map((s) => (
+                    <option key={`extra-${s.code}`} value={s.code}>
+                      {s.name}
+                    </option>
+                  ))}
+                </datalist>
+
+                <button
+                  onClick={addExtra}
+                  disabled={!extraTime || !extraCode}
+                  className="sm:col-span-3 py-3 rounded-2xl font-black bg-black text-white disabled:opacity-40"
+                >
+                  Add Extra
+                </button>
+              </div>
+
+              <div className="mt-2 text-xs font-bold text-gray-500">
+                Extras won’t auto-swap. If you want to replace a routine slot, use Swap mode.
+              </div>
+            </div>
+          )}
+
+          {/* lists */}
+          <div className="mt-6 grid grid-cols-1 gap-4">
+            <div>
+              <div className="text-sm font-black text-gray-800">Today&apos;s Swaps</div>
+
+              {dailySwaps.length === 0 ? (
+                <div className="mt-2 text-xs font-bold text-gray-400">No swaps.</div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {dailySwaps
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        time12ToMinutes(a.timeSlot) - time12ToMinutes(b.timeSlot)
+                    )
+                    .map((s) => {
+                      const fromName =
+                        getSubjectByCode(s.fromCode)?.name || s.fromCode;
+                      const toName = getSubjectByCode(s.toCode)?.name || s.toCode;
+
+                      return (
+                        <div
+                          key={`sw-${s.timeSlot}`}
+                          className="flex items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-gray-500">
+                              {s.timeSlot}
+                            </div>
+                            <div className="text-sm font-black truncate">
+                              {s.fromCode} → {s.toCode}
+                            </div>
+                            <div className="text-xs font-bold text-gray-500 truncate">
+                              {fromName} → {toName}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => removeSwap(s.timeSlot)}
+                            className="px-3 py-2 rounded-xl border border-gray-200 bg-white font-black text-xs"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-sm font-black text-gray-800">Today&apos;s Extras</div>
+
+              {dailyExtras.length === 0 ? (
+                <div className="mt-2 text-xs font-bold text-gray-400">No extras.</div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {dailyExtras
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        time12ToMinutes(a.timeSlot) - time12ToMinutes(b.timeSlot)
+                    )
+                    .map((e) => {
+                      const nm = getSubjectByCode(e.code)?.name || e.code;
+
+                      return (
+                        <div
+                          key={`ex-${e.timeSlot}-${e.code}`}
+                          className="flex items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-gray-500">
+                              {e.timeSlot}
+                            </div>
+                            <div className="text-sm font-black truncate">{e.code}</div>
+                            <div className="text-xs font-bold text-gray-500 truncate">
+                              {nm}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => removeExtra(e.timeSlot, e.code)}
+                            className="px-3 py-2 rounded-xl border border-gray-200 bg-white font-black text-xs"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
