@@ -1,7 +1,11 @@
 // FILE: src/models/Holiday.ts
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, type Model } from "mongoose";
 
-export type HolidayDoc = { date: string; label: string; isCancelled: boolean };
+export type HolidayDoc = {
+  date: string;
+  label: string;
+  isCancelled: boolean;
+};
 
 const HolidaySchema = new Schema<HolidayDoc>(
   {
@@ -12,4 +16,8 @@ const HolidaySchema = new Schema<HolidayDoc>(
   { timestamps: true }
 );
 
-export default mongoose.models.Holiday || mongoose.model<HolidayDoc>("Holiday", HolidaySchema);
+const Holiday =
+  (mongoose.models.Holiday as Model<HolidayDoc>) ||
+  mongoose.model<HolidayDoc>("Holiday", HolidaySchema);
+
+export default Holiday;
