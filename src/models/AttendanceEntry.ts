@@ -1,5 +1,5 @@
 // FILE: src/models/AttendanceEntry.ts
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, type Model } from "mongoose";
 
 export type AttendanceEntryDoc = {
   date: string;
@@ -22,5 +22,8 @@ const AttendanceEntrySchema = new Schema<AttendanceEntryDoc>(
 
 AttendanceEntrySchema.index({ date: 1, timeSlot: 1, code: 1 }, { unique: true });
 
-export default mongoose.models.AttendanceEntry ||
+const AttendanceEntry =
+  (mongoose.models.AttendanceEntry as Model<AttendanceEntryDoc>) ||
   mongoose.model<AttendanceEntryDoc>("AttendanceEntry", AttendanceEntrySchema);
+
+export default AttendanceEntry;
