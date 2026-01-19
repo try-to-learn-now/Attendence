@@ -11,14 +11,34 @@ export type DailyLogDoc = {
   note: string;
 };
 
+const SwapSchema = new Schema(
+  {
+    timeSlot: { type: String, required: true },
+    toCode: { type: String, required: true }
+  },
+  { _id: false }
+);
+
+const ExtraSchema = new Schema(
+  {
+    timeSlot: { type: String, required: true },
+    code: { type: String, required: true }
+  },
+  { _id: false }
+);
+
 const DailyLogSchema = new Schema<DailyLogDoc>(
   {
     date: { type: String, required: true, unique: true, index: true },
     mode: { type: String, enum: ["BIOMETRIC", "ONLINE"], default: "BIOMETRIC" },
     biometricDone: { type: Boolean, default: false },
-    holidayOverride: { type: String, enum: ["AUTO", "FORCE_HOLIDAY", "FORCE_WORKING"], default: "AUTO" },
-    swaps: { type: Array, default: [] },
-    extras: { type: Array, default: [] },
+    holidayOverride: {
+      type: String,
+      enum: ["AUTO", "FORCE_HOLIDAY", "FORCE_WORKING"],
+      default: "AUTO"
+    },
+    swaps: { type: [SwapSchema], default: [] },
+    extras: { type: [ExtraSchema], default: [] },
     note: { type: String, default: "" }
   },
   { timestamps: true }
