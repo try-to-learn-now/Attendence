@@ -1,7 +1,11 @@
 // FILE: src/models/Subject.ts
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, type Model } from "mongoose";
 
-export type SubjectDoc = { code: string; name: string; teacher: string };
+export type SubjectDoc = {
+  code: string;
+  name: string;
+  teacher: string;
+};
 
 const SubjectSchema = new Schema<SubjectDoc>(
   {
@@ -12,4 +16,8 @@ const SubjectSchema = new Schema<SubjectDoc>(
   { timestamps: true }
 );
 
-export default mongoose.models.Subject || mongoose.model<SubjectDoc>("Subject", SubjectSchema);
+const Subject =
+  (mongoose.models.Subject as Model<SubjectDoc>) ||
+  mongoose.model<SubjectDoc>("Subject", SubjectSchema);
+
+export default Subject;
