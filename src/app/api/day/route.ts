@@ -2,11 +2,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { dbConnect } from "@/lib/db";
-import DailyLog from "@/models/DailyLog";
-import Routine from "@/models/Routine";
-import Subject from "@/models/Subject";
-import Holiday from "@/models/Holiday";
-import AttendanceEntry from "@/models/AttendanceEntry";
+
+import DailyLog, { type DailyLogDoc } from "@/models/DailyLog";
+import Routine, { type RoutineDoc } from "@/models/Routine";
+import Subject, { type SubjectDoc } from "@/models/Subject";
+import Holiday, { type HolidayDoc } from "@/models/Holiday";
+import AttendanceEntry, { type AttendanceEntryDoc } from "@/models/AttendanceEntry";
+
 import { weekdayMon1ToSun7 } from "@/lib/date";
 import { TIME_SLOTS, type TimeSlot } from "@/types/core";
 import { applySwapsAndExtras } from "@/lib/schedule";
@@ -34,8 +36,8 @@ export async function GET(req: Request) {
   const date = url.searchParams.get("date");
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
-  const dayDoc = await DailyLog.findOne({ date }).lean();
-  const day =
+  const dayDoc = (await DailyLog.findOne({ date }).lean()) as DailyLogDoc | null;
+  const day: DailyLogDoc =
     dayDoc ??
     ({
       date,
@@ -45,15 +47,16 @@ export async function GET(req: Request) {
       swaps: [],
       extras: [],
       note: ""
-    } as any);
+    } as DailyLogDoc);
 
-  const subjects = await Subject.find({}).sort({ code: 1 }).lean();
+  const subjects = (await Subject.find({}).sort({ code: 1 }).lean()) as SubjectDoc[];
 
   const wd = weekdayMon1ToSun7(date); // 1..7
-  const routine = wd <= 6 ? await Routine.find({ day: wd }).lean() : [];
+  const routine = wd <= 6 ? ((await Routine.find({ day: wd }).lean()) as RoutineDoc[]) : [];
 
   const isSunday = wd === 7;
-  const holidayDb = await Holiday.findOne({ date }).lean();
+
+  const holidayDb = (await Holiday.findOne({ date }).lean()) as HolidayDoc | null;
   const dbHolidayActive = holidayDb ? !holidayDb.isCancelled : false;
 
   let isHoliday = false;
@@ -74,7 +77,7 @@ export async function GET(req: Request) {
     }
   }
 
-  const entries = await AttendanceEntry.find({ date }).lean();
+  const entries = (await AttendanceEntry.find({ date }).lean()) as AttendanceEntryDoc[];
 
   const base = TIME_SLOTS.map((t) => {
     const found = routine.find((r) => r.timeSlot === t);
@@ -100,9 +103,16 @@ export async function POST(req: Request) {
   await dbConnect();
   const body = Upsert.parse(await req.json());
 
-  const set: any = { ...body };
-  if (set.mode === "ONLINE") set.biometricDone = false; // mutual exclusive
+  const set: Partial<DailyLogDoc> & { date: string } = { ...body };
 
-  const doc = await DailyLog.findOneAndUpdate({ date: body.date }, { $set: set }, { upsert: true, new: true }).lean();
+  // mutual exclusive: ONLINE => biometricDone false
+  if (set.mode === "ONLINE") set.biometricDone = false;
+
+  const doc = (await DailyLog.findOneAndUpdate(
+    { date: body.date },
+    { $set: set },
+    { upsert: true, new: true }
+  ).lean()) as DailyLogDoc;
+
   return NextResponse.json(doc);
 }
