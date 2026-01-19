@@ -1,5 +1,5 @@
 // FILE: src/models/DailyLog.ts
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, type Model } from "mongoose";
 
 export type DailyLogDoc = {
   date: string;
@@ -24,4 +24,8 @@ const DailyLogSchema = new Schema<DailyLogDoc>(
   { timestamps: true }
 );
 
-export default mongoose.models.DailyLog || mongoose.model<DailyLogDoc>("DailyLog", DailyLogSchema);
+const DailyLog =
+  (mongoose.models.DailyLog as Model<DailyLogDoc>) ||
+  mongoose.model<DailyLogDoc>("DailyLog", DailyLogSchema);
+
+export default DailyLog;
