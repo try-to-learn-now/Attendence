@@ -1,7 +1,11 @@
 // FILE: src/models/Routine.ts
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, type Model } from "mongoose";
 
-export type RoutineDoc = { day: number; timeSlot: string; code: string };
+export type RoutineDoc = {
+  day: number;
+  timeSlot: string;
+  code: string;
+};
 
 const RoutineSchema = new Schema<RoutineDoc>(
   {
@@ -14,4 +18,8 @@ const RoutineSchema = new Schema<RoutineDoc>(
 
 RoutineSchema.index({ day: 1, timeSlot: 1 }, { unique: true });
 
-export default mongoose.models.Routine || mongoose.model<RoutineDoc>("Routine", RoutineSchema);
+const Routine =
+  (mongoose.models.Routine as Model<RoutineDoc>) ||
+  mongoose.model<RoutineDoc>("Routine", RoutineSchema);
+
+export default Routine;
