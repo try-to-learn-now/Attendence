@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { dbConnect } from "@/lib/db";
-import DailyLog from "@/models/DailyLog";
+import DailyLog, { type DailyLogDoc } from "@/models/DailyLog";
 import AttendanceEntry from "@/models/AttendanceEntry";
 
 export const runtime = "nodejs";
@@ -26,9 +26,9 @@ export async function POST(req: Request) {
   await dbConnect();
   const body = Upsert.parse(await req.json());
 
-  const day = await DailyLog.findOne({ date: body.date }).lean();
-  const mode = (day?.mode ?? "BIOMETRIC") as "BIOMETRIC" | "ONLINE";
-  const biometricDone = !!day?.biometricDone;
+  const day = (await DailyLog.findOne({ date: body.date }).lean()) as DailyLogDoc | null;
+  const mode: "BIOMETRIC" | "ONLINE" = day?.mode ?? "BIOMETRIC";
+  const biometricDone = day?.biometricDone ?? false;
 
   // RULE: BIOMETRIC + biometricDone=false => cannot mark PRESENT/PRESENT_PROXY
   if (mode === "BIOMETRIC" && biometricDone === false) {
